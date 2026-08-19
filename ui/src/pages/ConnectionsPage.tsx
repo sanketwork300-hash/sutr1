@@ -251,6 +251,10 @@ export default function ConnectionsPage() {
           setChooserOpen(false)
           navigate('/integrations/custom-api/new')
         }}
+        onPickOpenApi={() => {
+          setChooserOpen(false)
+          navigate('/integrations/openapi/new')
+        }}
       />
     </>
   )

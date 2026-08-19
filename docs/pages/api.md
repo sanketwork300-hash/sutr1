@@ -332,6 +332,62 @@ only for this request and is not persisted.
 
 ---
 
+## OpenAPI projects
+
+Import an OpenAPI 3.x document and compile it into a custom API integration. The generated tools flow through the same install/discovery/approval/execution pipeline as every other integration.
+
+### `POST /api/openapi/import`
+
+Import a specification. Requires `integrations:manage`.
+
+**Body:**
+```json
+{
+  "name": "Petstore",
+  "source_kind": "paste",
+  "content": "{ \"openapi\": \"3.0.3\", ... }"
+}
+```
+
+`source_kind` is `paste`, `upload`, or `url` (with `url` instead of `content`). URL fetches are SSRF-screened (no private/loopback targets, no redirects) and size-capped. The document is validated against the official OpenAPI 3.0/3.1 schemas; `$ref`s are resolved cycle-safely; Swagger 2.0 is rejected.
+
+**Response (201):** the project with `api_title`, `api_version`, `operation_count`, per-operation summaries, discovered `tags`, `servers`, and `suggested_auth` translated from the spec's security schemes.
+
+### `GET /api/openapi` / `GET /api/openapi/{project_id}`
+
+List projects / full project detail.
+
+### `POST /api/openapi/{project_id}/compile`
+
+Compile the project into tools. Requires `integrations:manage`.
+
+**Body:**
+```json
+{
+  "dry_run": true,
+  "filters": {
+    "include_tags": [], "exclude_tags": ["admin"],
+    "include_paths": [], "exclude_paths": ["/internal/*"],
+    "include_operations": [], "exclude_operations": [],
+    "include_deprecated": false
+  },
+  "server_url": "https://api.example.com/v1",
+  "server_variables": {"environment": "api"},
+  "auth": {"token_header": "X-Api-Key", "token_format": "{token}"},
+  "integration_name": "Petstore Tools"
+}
+```
+
+With `dry_run: true` the response previews the exact tools (deterministic names from `operationId`, documented collision handling), warnings, resolved base URL, and auth — nothing is created. Without it, a custom API integration is created (or updated in place on recompile) and appears in the catalog; connect and set per-tool approval policies as usual. The base URL is SSRF-validated at compile time and again on every call.
+
+### `DELETE /api/openapi/{project_id}`
+
+Delete the import artifact. A compiled integration lives on and is managed through the custom-API endpoints.
+
+CLI equivalents: `sutr openapi import|list|show|compile|delete`.
+
+---
+
 ## Installed integrations
 
 Manage configured instances of integrations, scoped to your organization.

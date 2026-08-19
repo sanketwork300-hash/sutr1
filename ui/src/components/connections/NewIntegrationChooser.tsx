@@ -1,4 +1,4 @@
-import { Code, Plug } from 'lucide-react'
+import { Code, FileJson, Plug } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 interface Props {
@@ -6,9 +6,10 @@ interface Props {
   onClose: () => void
   onPickMcp: () => void
   onPickApi: () => void
+  onPickOpenApi: () => void
 }
 
-export function NewIntegrationChooser({ open, onClose, onPickMcp, onPickApi }: Props) {
+export function NewIntegrationChooser({ open, onClose, onPickMcp, onPickApi, onPickOpenApi }: Props) {
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="sm:max-w-[520px]">
@@ -29,7 +30,7 @@ export function NewIntegrationChooser({ open, onClose, onPickMcp, onPickApi }: P
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
+            gridTemplateColumns: '1fr 1fr 1fr',
             gap: 10,
             paddingTop: 4,
           }}
@@ -45,6 +46,12 @@ export function NewIntegrationChooser({ open, onClose, onPickMcp, onPickApi }: P
             label="Custom API"
             hint="Wrap a REST endpoint as agent tools."
             onClick={onPickApi}
+          />
+          <ChoiceCard
+            icon={<FileJson size={18} />}
+            label="OpenAPI spec"
+            hint="Compile an OpenAPI document into tools."
+            onClick={onPickOpenApi}
           />
         </div>
       </DialogContent>

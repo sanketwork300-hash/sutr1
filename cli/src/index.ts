@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { authCommand } from "./commands/auth.js";
 import { integrationsCommand } from "./commands/integrations.js";
+import { openapiCommand } from "./commands/openapi.js";
 import { outputCommand } from "./commands/output.js";
 import { toolsCommand } from "./commands/tools.js";
 
@@ -15,6 +16,7 @@ program
 
 program.addCommand(authCommand);
 program.addCommand(integrationsCommand);
+program.addCommand(openapiCommand);
 program.addCommand(outputCommand);
 program.addCommand(toolsCommand);
 

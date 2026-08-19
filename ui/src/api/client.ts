@@ -183,6 +183,95 @@ export interface CustomApiTestResult {
   duration_ms?: number
 }
 
+export interface OpenApiWarning {
+  code: string
+  message: string
+  context?: string | null
+}
+
+export interface OpenApiOperationSummary {
+  operation_id: string | null
+  method: string
+  path: string
+  summary: string | null
+  tags: string[]
+  deprecated: boolean
+}
+
+export interface OpenApiServer {
+  url: string
+  description?: string | null
+  variables?: Record<string, { default?: string; enum?: string[] }>
+}
+
+export interface OpenApiProject {
+  id: string
+  name: string
+  source_kind: string
+  source_url: string | null
+  status: string
+  api_title: string
+  api_version: string
+  openapi_version: string
+  operation_count: number
+  integration_db_id: string | null
+  created_at: string
+  updated_at: string
+  warnings: OpenApiWarning[]
+  // Detail-only fields:
+  description?: string | null
+  servers?: OpenApiServer[]
+  suggested_auth?: { token_header: string; token_format: string; warnings: OpenApiWarning[] }
+  operations?: OpenApiOperationSummary[]
+  tags?: string[]
+  server_url?: string | null
+  server_variables?: Record<string, string>
+}
+
+export interface OpenApiImportRequest {
+  name?: string
+  source_kind: 'paste' | 'upload' | 'url'
+  content?: string
+  url?: string
+}
+
+export interface OpenApiCompileRequest {
+  filters?: {
+    include_tags?: string[]
+    exclude_tags?: string[]
+    include_paths?: string[]
+    exclude_paths?: string[]
+    include_deprecated?: boolean
+  }
+  server_url?: string
+  server_variables?: Record<string, string>
+  auth?: { token_header: string; token_format: string }
+  integration_name?: string
+  dry_run?: boolean
+}
+
+export interface OpenApiCompiledToolPreview {
+  name: string
+  description: string
+  method: string
+  path: string
+  tags: string[]
+  operation_id: string | null
+  renamed_from: string | null
+  param_count: number
+}
+
+export interface OpenApiCompileResult {
+  tools: OpenApiCompiledToolPreview[]
+  warnings: OpenApiWarning[]
+  auth: { token_header: string; token_format: string }
+  base_url: string
+  dry_run: boolean
+  integration_db_id?: string
+  integration_id?: string
+  project?: OpenApiProject
+}
+
 export interface CreateCustomMcpRequest {
   name: string
   url: string
@@ -595,6 +684,29 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       })
+    },
+  },
+  openapi: {
+    list() {
+      return request<OpenApiProject[]>('/openapi')
+    },
+    import(data: OpenApiImportRequest) {
+      return request<OpenApiProject>('/openapi/import', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      })
+    },
+    get(id: string) {
+      return request<OpenApiProject>(`/openapi/${encodeURIComponent(id)}`)
+    },
+    compile(id: string, data: OpenApiCompileRequest) {
+      return request<OpenApiCompileResult>(`/openapi/${encodeURIComponent(id)}/compile`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      })
+    },
+    remove(id: string) {
+      return request<void>(`/openapi/${encodeURIComponent(id)}`, { method: 'DELETE' })
     },
   },
   installed: {
