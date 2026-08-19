@@ -1,0 +1,39 @@
+{
+  "name": "@sutr/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for Sutr — the governed tool gateway for AI agents",
+  "license": "MIT",
+  "homepage": "https://github.com/sutr-dev/sutr",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sutr-dev/sutr"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "tsup": "^8",
+    "typescript": "^5",
+    "vitest": "^2"
+  }
+}

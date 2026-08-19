@@ -14,7 +14,16 @@
         },
         {
             "section": "Connect",
-            "items": ["connect/mcp", "connect/cli", "connect/skills"]
+            "items": [
+                "connect/mcp",
+                "connect/cli",
+                "connect/sdk",
+                "connect/skills"
+            ]
+        },
+        {
+            "section": "Reference",
+            "items": ["api", "tool-approvals"]
         },
         {
             "section": "Agents",
