@@ -3,7 +3,7 @@ import secrets
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -14,6 +14,7 @@ from sutr.dependencies import get_current_org, get_current_user
 from sutr.models.api_key import ApiKey
 from sutr.models.org import Org
 from sutr.models.user import User
+from sutr.services.audit import record_audit
 
 router = APIRouter(prefix="/api/api-keys", tags=["api-keys"])
 
@@ -50,6 +51,7 @@ def _generate_key() -> tuple[str, str, str]:
 @router.post("", status_code=201)
 def create_api_key(
     body: CreateApiKeyRequest,
+    http_request: Request,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
     current_org: Org = Depends(get_current_org),
@@ -64,6 +66,16 @@ def create_api_key(
         key_hash=key_hash,
     )
     session.add(api_key)
+    record_audit(
+        session,
+        org_id=current_org.id,
+        action="api_key.created",
+        summary=f"API key '{body.name}' ({key_prefix}...) created",
+        actor_user_id=current_user.id,
+        target_type="api_key",
+        target_id=key_prefix,
+        request=http_request,
+    )
     session.commit()
     session.refresh(api_key)
     posthog_client.capture(
@@ -105,6 +117,7 @@ def list_api_keys(
 @router.delete("/{key_id}", status_code=204)
 def revoke_api_key(
     key_id: uuid.UUID,
+    http_request: Request,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
     current_org: Org = Depends(get_current_org),
@@ -117,6 +130,16 @@ def revoke_api_key(
         raise HTTPException(status_code=404, detail="API key not found")
     api_key.is_active = False
     session.add(api_key)
+    record_audit(
+        session,
+        org_id=current_org.id,
+        action="api_key.revoked",
+        summary=f"API key '{api_key.name}' ({api_key.key_prefix}...) revoked",
+        actor_user_id=current_user.id,
+        target_type="api_key",
+        target_id=api_key.key_prefix,
+        request=http_request,
+    )
     session.commit()
     posthog_client.capture(
         distinct_id=str(current_user.id),

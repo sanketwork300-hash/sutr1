@@ -31,6 +31,7 @@ from sutr.analytics import posthog_client  # noqa: E402
 from sutr.api import (  # noqa: E402
     admin,
     api_keys,
+    audit,
     auth,
     billing,
     custom_api,
@@ -299,6 +300,7 @@ app.include_router(orgs.accept_router)
 app.include_router(workspaces.router)
 app.include_router(tool_approvals.router)
 app.include_router(logs.router)
+app.include_router(audit.router)
 app.include_router(oauth_server.router)
 
 # MCP SDK OAuth Authorization Server routes

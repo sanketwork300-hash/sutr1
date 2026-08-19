@@ -19,12 +19,13 @@ from sutr.analytics import posthog_client
 from sutr.auth_tokens import create_access_token, create_impersonation_token
 from sutr.config import settings
 from sutr.db import get_session
-from sutr.dependencies import get_impersonator, require_admin
+from sutr.dependencies import default_membership, get_impersonator, require_admin
 from sutr.email import normalize_email
 from sutr.models.instance_settings import InstanceSettings
 from sutr.models.oauth_revoked_token import OAuthRevokedToken
 from sutr.models.user import User
 from sutr.models.waitlist import Waitlist
+from sutr.services.audit import record_audit
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -298,6 +299,23 @@ def start_impersonation(
     token, jti = create_impersonation_token(
         str(admin.id), str(target.id), token_version=target.token_version
     )
+
+    # Audit under the target's default org — that is whose data the admin can
+    # now touch, and where the org's owners would look for the record.
+    target_membership = default_membership(session, target.id)
+    if target_membership is not None:
+        record_audit(
+            session,
+            org_id=target_membership.org_id,
+            action="admin.impersonation_started",
+            summary=f"Admin {admin.email} started impersonating {target.email}",
+            actor_user_id=admin.id,
+            target_type="user",
+            target_id=str(target.id),
+            metadata={"jti": jti, "ttl_minutes": settings.impersonation_ttl_minutes},
+            request=request,
+        )
+        session.commit()
 
     posthog_client.capture(
         distinct_id=str(admin.id),

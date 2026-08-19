@@ -555,12 +555,13 @@ Read the current org's settings.
 
 ### `PATCH /api/org-settings`
 
-Update the org's settings. Pass `null` to revert a field to the instance default.
+Update the org's settings. Only fields present in the body are applied; pass `null` to revert a field to its default.
 
 **Body:**
 ```json
 {
-  "approval_expiry_minutes": 30
+  "approval_expiry_minutes": 30,
+  "log_retention_days": 90
 }
 ```
 
@@ -651,6 +652,14 @@ Approve a pending request for one-time use. The agent must retry the call to con
 
 Returns `409` if already decided. Returns `410` if expired. Returns `403` with `{"detail": {"error": "totp_required" | "totp_invalid", ...}}` when the user has TOTP enabled and the code is missing or wrong.
 
+### `POST /api/tool-approvals/requests/{request_id}/approve-exact`
+
+Approve a pending request for these **exact arguments, forever**. Future calls whose normalized argument hash matches execute without a new approval and are logged with `access_reason: "approved_exact"`; any change to the arguments goes back through the approval gate. The grant is never consumed and does not expire.
+
+Accepts the same optional `totp_code` body as `approve-once`.
+
+**Response:** The updated approval request with `decision_mode: "approve_exact_forever"`.
+
 ### `POST /api/tool-approvals/requests/{request_id}/allow-tool`
 
 Approve a pending request and allow all future calls to this tool regardless of arguments.
@@ -666,6 +675,35 @@ Deny a pending request.
 Accepts the same optional `totp_code` body as `approve-once`.
 
 **Response:** The updated approval request with `status: "denied"`.
+
+---
+
+## Audit trail
+
+### `GET /api/audit`
+
+Control-plane audit events for the organization: logins, password/TOTP changes, API-key lifecycle, per-tool policy changes (with old and new mode), approval decisions, integration installs/uninstalls, membership and invitation changes, and admin impersonation. Requires the `audit:read` permission (owner or admin).
+
+Query params: `action`, `target_type`, `target_id`, `limit` (max 500), `offset`.
+
+```json
+[
+  {
+    "id": 12,
+    "timestamp": "2026-08-19T12:00:00",
+    "action": "policy.mode_changed",
+    "actor_type": "user",
+    "actor_user_id": "6ba7b810-...",
+    "target_type": "tool_policy",
+    "target_id": "posthog/create_annotation",
+    "summary": "create_annotation on posthog: require_approval -> allow",
+    "metadata_json": "{\"old_mode\": \"require_approval\", \"new_mode\": \"allow\"}",
+    "ip": "203.0.113.7"
+  }
+]
+```
+
+Audit events are append-only and exempt from log retention. Tool-call logs (`/api/logs`) are stored with credential-shaped values redacted (`[REDACTED]`) and can be pruned by setting `log_retention_days` in `PATCH /api/org-settings`.
 
 ---
 

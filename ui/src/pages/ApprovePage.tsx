@@ -125,7 +125,7 @@ export default function ApprovePage({
     return <Navigate to={`/login?redirect=/approve/${id}`} replace />
   }
 
-  async function act(action: 'approve-once' | 'allow-tool' | 'deny') {
+  async function act(action: 'approve-once' | 'approve-exact' | 'allow-tool' | 'deny') {
     if (!id) return
     const codeToSend = useRecovery ? recoveryCode.trim() : totpCode
     if (totpRequired) {
@@ -146,9 +146,11 @@ export default function ApprovePage({
       const fn =
         action === 'approve-once'
           ? api.approvals.approveOnce
-          : action === 'allow-tool'
-            ? api.approvals.allowTool
-            : api.approvals.deny
+          : action === 'approve-exact'
+            ? api.approvals.approveExact
+            : action === 'allow-tool'
+              ? api.approvals.allowTool
+              : api.approvals.deny
       const updated = await fn(id, totpRequired ? codeToSend : undefined)
       setReq(updated)
       setResult({ action, ok: true })
@@ -553,9 +555,11 @@ export default function ApprovePage({
                 <span>
                   {result.action === 'approve-once'
                     ? 'Approved for this call. The agent can proceed.'
-                    : result.action === 'allow-tool'
-                      ? `All future calls to ${req?.tool_name} will auto-execute.`
-                      : 'Denied. The agent will be blocked.'}
+                    : result.action === 'approve-exact'
+                      ? 'Approved forever for these exact arguments.'
+                      : result.action === 'allow-tool'
+                        ? `All future calls to ${req?.tool_name} will auto-execute.`
+                        : 'Denied. The agent will be blocked.'}
                 </span>
               </div>
             )}
@@ -636,6 +640,14 @@ export default function ApprovePage({
                     <CheckCircle2 size={14} style={{ marginRight: 6 }} />
                   )}
                   {acting ? 'Working...' : 'Approve Once'}
+                </Button>
+                <Button
+                  onClick={() => act('approve-exact')}
+                  disabled={acting}
+                  variant="outline"
+                  style={{ width: '100%', height: 40, fontSize: 13 }}
+                >
+                  Always approve these exact arguments
                 </Button>
                 <Button
                   onClick={() => act('allow-tool')}

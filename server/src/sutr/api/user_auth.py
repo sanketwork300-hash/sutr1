@@ -13,7 +13,7 @@ from sutr.analytics import posthog_client
 from sutr.auth_tokens import create_access_token
 from sutr.config import settings
 from sutr.db import get_session
-from sutr.dependencies import oauth2_scheme
+from sutr.dependencies import default_membership, oauth2_scheme
 from sutr.email import normalize_email
 from sutr.email.verification import get_email_verification_required_detail
 from sutr.models.oauth_revoked_token import OAuthRevokedToken
@@ -24,6 +24,7 @@ from sutr.rate_limit import (
     login_failure_ip_limiter,
 )
 from sutr.security import hash_password, verify_password
+from sutr.services.audit import record_audit
 from sutr.totp import verify_second_factor
 
 logger = logging.getLogger(__name__)
@@ -155,6 +156,18 @@ def login(
         session.commit()
 
     token = create_access_token(str(user.id), token_version=user.token_version)
+    # Audit under the user's default org (logins are not org-scoped requests).
+    membership = default_membership(session, user.id)
+    if membership is not None:
+        record_audit(
+            session,
+            org_id=membership.org_id,
+            action="auth.login",
+            summary=f"{user.email} logged in",
+            actor_user_id=user.id,
+            request=request,
+        )
+        session.commit()
     posthog_client.capture(
         distinct_id=str(user.id),
         event="user_logged_in",

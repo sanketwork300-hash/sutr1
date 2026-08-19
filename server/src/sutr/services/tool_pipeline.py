@@ -26,7 +26,6 @@ Canonical log semantics (both surfaces, enforced here):
   impersonator attribution, and duration_ms for executed/error outcomes
 """
 
-import json
 import logging
 import time
 import uuid
@@ -39,6 +38,7 @@ from sutr.analytics import posthog_client
 from sutr.approvals.policy import evaluate_policy
 from sutr.approvals.requests import (
     create_auto_approved_request,
+    find_exact_forever_grant,
     get_or_create_approval_request,
     try_consume_approved_request,
 )
@@ -50,6 +50,7 @@ from sutr.mcp import oauth as oauth_refresh
 from sutr.models.integration import InstalledIntegration
 from sutr.models.log import LogEntry
 from sutr.models.oauth import OAuthState
+from sutr.services.redaction import redact_args, redact_result
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +151,7 @@ def evaluate_gate(
                 org_id=ctx.org_id,
                 integration_id=integration_id,
                 tool_name=tool_name,
-                args_json=json.dumps(args),
+                args_json=redact_args(args),
                 args_hash=decision.args_hash,
                 outcome="denied",
                 requester_ip=ctx.requester_ip,
@@ -179,6 +180,20 @@ def evaluate_gate(
             session, ctx.org_id, integration_id, tool_name, decision.args_hash
         )
         if consumed is None:
+            # A standing approve-exact-forever grant covers this exact hash
+            # permanently; it is never consumed.
+            grant = find_exact_forever_grant(
+                session, ctx.org_id, integration_id, tool_name, decision.args_hash
+            )
+            if grant is not None:
+                gate_log = find_gate_log(session, grant.id)
+                return GateResult(
+                    status="ready",
+                    args_hash=decision.args_hash,
+                    access_reason="approved_exact",
+                    approval_request_id=grant.id,
+                    pending_log_id=gate_log.id if gate_log else None,
+                )
             approval_req = get_or_create_approval_request(
                 session,
                 ctx.org_id,
@@ -200,7 +215,7 @@ def evaluate_gate(
                         org_id=ctx.org_id,
                         integration_id=integration_id,
                         tool_name=tool_name,
-                        args_json=json.dumps(args),
+                        args_json=redact_args(args),
                         args_hash=decision.args_hash,
                         approval_request_id=approval_req.id,
                         outcome="pending",
@@ -357,7 +372,7 @@ async def execute_tool(
 
     outcome = "executed" if last_error is None else "error"
     error_str = str(last_error) if last_error else None
-    result_json = json.dumps(result) if result and last_error is None else None
+    result_json = redact_result(result) if result and last_error is None else None
 
     with Session(db.engine) as session:
         log = session.get(LogEntry, gate.pending_log_id) if gate.pending_log_id else None
@@ -380,7 +395,7 @@ async def execute_tool(
                     org_id=ctx.org_id,
                     integration_id=integration_id,
                     tool_name=tool_name,
-                    args_json=json.dumps(arguments),
+                    args_json=redact_args(arguments),
                     args_hash=gate.args_hash,
                     approval_request_id=gate.approval_request_id,
                     access_reason=gate.access_reason,

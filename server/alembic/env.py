@@ -6,6 +6,7 @@ from sqlmodel import SQLModel
 from alembic import context
 from sutr.config import settings
 from sutr.models.api_key import ApiKey  # noqa: F401
+from sutr.models.audit_event import AuditEvent  # noqa: F401
 from sutr.models.custom_api_integration import CustomApiIntegration  # noqa: F401
 from sutr.models.custom_mcp_integration import CustomMcpIntegration  # noqa: F401
 from sutr.models.google_login_state import GoogleLoginState  # noqa: F401

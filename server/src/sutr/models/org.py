@@ -13,3 +13,6 @@ class Org(SQLModel, table=True):
     # Per-org override for how long a pending approval request stays valid
     # before expiring. None falls back to settings.approval_expiry_minutes.
     approval_expiry_minutes: int | None = Field(default=None)
+    # Tool-call log retention in days. None keeps logs forever (the historical
+    # behavior). The audit trail is exempt — audit rows are never pruned.
+    log_retention_days: int | None = Field(default=None)

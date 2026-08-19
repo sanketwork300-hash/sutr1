@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timedelta
 
+from sqlalchemy import update as sa_update
 from sqlmodel import Session, select
 
 from sutr.approvals.normalize import hash_normalized_args, normalize_tool_args
@@ -129,7 +130,12 @@ def try_consume_approved_request(
     tool_name: str,
     args_hash: str,
 ) -> ToolApprovalRequest | None:
-    """Try to consume an approve-once request. Returns the consumed request or None."""
+    """Try to consume an approve-once request. Returns the consumed request or None.
+
+    The transition is a conditional UPDATE keyed on status="approved", so two
+    concurrent callers racing to consume the same grant resolve to exactly one
+    winner — the loser sees rowcount 0 and falls back to the approval gate.
+    """
     now = datetime.utcnow()
     request = session.exec(
         select(ToolApprovalRequest)
@@ -144,8 +150,37 @@ def try_consume_approved_request(
     if not request:
         return None
 
-    request.status = "consumed"
-    request.consumed_at = now
-    session.add(request)
+    result = session.execute(
+        sa_update(ToolApprovalRequest)
+        .where(ToolApprovalRequest.id == request.id)  # type: ignore[arg-type]
+        .where(ToolApprovalRequest.status == "approved")  # type: ignore[arg-type]
+        .values(status="consumed", consumed_at=now)
+    )
     session.commit()
+    if result.rowcount != 1:
+        return None
+    session.refresh(request)
     return request
+
+
+def find_exact_forever_grant(
+    session: Session,
+    org_id: uuid.UUID,
+    integration_id: str,
+    tool_name: str,
+    args_hash: str,
+) -> ToolApprovalRequest | None:
+    """A standing approve-exact-forever grant for this exact argument hash.
+
+    Never consumed: the human approved this tool with these exact arguments
+    permanently. Expiry does not apply once approved.
+    """
+    return session.exec(
+        select(ToolApprovalRequest)
+        .where(ToolApprovalRequest.org_id == org_id)
+        .where(ToolApprovalRequest.integration_id == integration_id)
+        .where(ToolApprovalRequest.tool_name == tool_name)
+        .where(ToolApprovalRequest.args_hash == args_hash)
+        .where(ToolApprovalRequest.status == "approved")
+        .where(ToolApprovalRequest.decision_mode == "approve_exact_forever")
+    ).first()

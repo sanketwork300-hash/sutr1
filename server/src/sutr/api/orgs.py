@@ -28,6 +28,7 @@ from sutr.models.org_invitation import OrgInvitation
 from sutr.models.org_membership import OrgMembership
 from sutr.models.user import User
 from sutr.security import hash_password
+from sutr.services.audit import record_audit
 
 router = APIRouter(prefix="/api/org", tags=["org"])
 
@@ -135,8 +136,19 @@ def rename_org(
     name = body.name.strip()
     if not name or len(name) > 120:
         raise HTTPException(status_code=400, detail="Organization name must be 1-120 characters")
+    old_name = ctx.org.name
     ctx.org.name = name
     session.add(ctx.org)
+    record_audit(
+        session,
+        org_id=ctx.org.id,
+        action="org.renamed",
+        summary=f"Organization renamed '{old_name}' -> '{name}'",
+        actor_user_id=ctx.user.id,
+        target_type="org",
+        target_id=str(ctx.org.id),
+        metadata={"old_name": old_name, "new_name": name},
+    )
     session.commit()
     session.refresh(ctx.org)
     return OrgResponse(id=str(ctx.org.id), name=ctx.org.name, role=ctx.role)
@@ -185,8 +197,19 @@ def update_member_role(
     ):
         raise HTTPException(status_code=409, detail="An organization must keep at least one owner")
 
+    old_role = membership.role
     membership.role = body.role
     session.add(membership)
+    record_audit(
+        session,
+        org_id=ctx.org.id,
+        action="org.member_role_changed",
+        summary=f"Member role changed {old_role} -> {body.role}",
+        actor_user_id=ctx.user.id,
+        target_type="user",
+        target_id=str(user_id),
+        metadata={"old_role": old_role, "new_role": body.role},
+    )
     session.commit()
 
     target = session.get(User, user_id)
@@ -220,6 +243,16 @@ def remove_member(
         raise HTTPException(status_code=403, detail="Only an owner can remove an owner")
 
     session.delete(membership)
+    record_audit(
+        session,
+        org_id=ctx.org.id,
+        action="org.member_removed",
+        summary=("Member left the organization" if user_id == ctx.user.id else "Member removed"),
+        actor_user_id=ctx.user.id,
+        target_type="user",
+        target_id=str(user_id),
+        metadata={"removed_role": membership.role, "self": user_id == ctx.user.id},
+    )
     session.commit()
 
 
@@ -277,6 +310,16 @@ def create_invitation(
         expires_at=_utcnow() + timedelta(days=INVITATION_TTL_DAYS),
     )
     session.add(inv)
+    record_audit(
+        session,
+        org_id=ctx.org.id,
+        action="org.invitation_created",
+        summary=f"Invited {email} as {body.role}",
+        actor_user_id=ctx.user.id,
+        target_type="invitation",
+        target_id=email,
+        metadata={"role": body.role},
+    )
     session.commit()
     session.refresh(inv)
 
@@ -311,6 +354,16 @@ def revoke_invitation(
         raise HTTPException(status_code=409, detail="Invitation is no longer pending")
     inv.revoked_at = _utcnow()
     session.add(inv)
+    record_audit(
+        session,
+        org_id=ctx.org.id,
+        action="org.invitation_revoked",
+        summary=f"Revoked invitation for {inv.email}",
+        actor_user_id=ctx.user.id,
+        target_type="invitation",
+        target_id=inv.email,
+        metadata={"role": inv.role},
+    )
     session.commit()
 
 
@@ -417,6 +470,16 @@ def accept_invitation(
     inv.accepted_at = _utcnow()
     inv.accepted_by_user_id = user.id
     session.add(inv)
+    record_audit(
+        session,
+        org_id=org.id,
+        action="org.invitation_accepted",
+        summary=f"{inv.email} joined as {inv.role}",
+        actor_user_id=user.id,
+        target_type="invitation",
+        target_id=inv.email,
+        metadata={"role": inv.role, "created_account": created_account},
+    )
     session.commit()
 
     posthog_client.capture(

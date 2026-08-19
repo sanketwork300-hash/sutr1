@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from sqlalchemy import update as sa_update
 from sqlmodel import Session, col, select
 
 from sutr.analytics import posthog_client
@@ -17,6 +18,7 @@ from sutr.models.org import Org
 from sutr.models.tool_approval_request import ToolApprovalRequest
 from sutr.models.tool_execution import ToolExecutionSetting
 from sutr.models.user import User
+from sutr.services.audit import record_audit
 
 router = APIRouter(prefix="/api/tool-approvals", tags=["tool-approvals"])
 
@@ -149,6 +151,103 @@ async def await_request(
     return _build_await_response(req, status)
 
 
+def _load_pending_request(
+    session: Session, request_id: uuid.UUID, org_id: uuid.UUID
+) -> ToolApprovalRequest:
+    """Load a request for a decision: 404 unknown, 409 decided, 410 expired."""
+    req = session.get(ToolApprovalRequest, request_id)
+    if not req or req.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Approval request not found")
+    if req.status != "pending":
+        raise HTTPException(status_code=409, detail=f"Request is already '{req.status}'")
+    if req.expires_at <= datetime.utcnow():
+        req.status = "expired"
+        session.add(req)
+        session.commit()
+        raise HTTPException(status_code=410, detail="Approval request has expired")
+    return req
+
+
+def _transition_pending(session: Session, request_id: uuid.UUID, now: datetime, **values) -> None:
+    """Atomically transition a request out of `pending`.
+
+    A single conditional UPDATE closes the check-then-act window between two
+    concurrent decisions (approve vs deny, double-approve): exactly one caller
+    observes rowcount == 1; the loser gets a 409 instead of silently
+    overwriting the winner's decision.
+    """
+    result = session.execute(
+        sa_update(ToolApprovalRequest)
+        .where(ToolApprovalRequest.id == request_id)  # type: ignore[arg-type]
+        .where(ToolApprovalRequest.status == "pending")  # type: ignore[arg-type]
+        .where(ToolApprovalRequest.expires_at > now)  # type: ignore[arg-type]
+        .values(**values)
+    )
+    if result.rowcount != 1:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="Request was decided concurrently or expired")
+
+
+def _decide(
+    *,
+    session: Session,
+    http_request: Request,
+    current_user: User,
+    current_org: Org,
+    request_id: uuid.UUID,
+    totp_code: str | None,
+    status: str,
+    decision_mode: str,
+    log_outcome: str,
+    audit_action: str,
+    posthog_event: str,
+    policy_created: bool = False,
+) -> ToolApprovalRequest:
+    req = _load_pending_request(session, request_id, current_org.id)
+
+    require_second_factor(current_user, totp_code)
+    session.add(current_user)
+
+    now = datetime.utcnow()
+    approver_ip = http_request.client.host if http_request.client else None
+    _transition_pending(
+        session,
+        request_id,
+        now,
+        status=status,
+        decision_mode=decision_mode,
+        decided_by_user_id=current_user.id,
+        decided_at=now,
+        approver_ip=approver_ip,
+        policy_created=policy_created,
+    )
+    _update_pending_log(session, request_id, log_outcome)
+    record_audit(
+        session,
+        org_id=current_org.id,
+        action=audit_action,
+        summary=f"{req.tool_name} on {req.integration_id}: {decision_mode}",
+        actor_user_id=current_user.id,
+        target_type="approval_request",
+        target_id=str(request_id),
+        metadata={
+            "integration_id": req.integration_id,
+            "tool_name": req.tool_name,
+            "decision_mode": decision_mode,
+        },
+        request=http_request,
+    )
+    session.commit()
+    session.refresh(req)
+    approval_events.notify_decision(request_id, req.status)
+    posthog_client.capture(
+        distinct_id=str(current_user.id),
+        event=posthog_event,
+        properties={"integration_id": req.integration_id, "tool_name": req.tool_name},
+    )
+    return req
+
+
 @router.post("/requests/{request_id}/approve-once")
 def approve_once(
     request_id: uuid.UUID,
@@ -159,36 +258,51 @@ def approve_once(
     current_org: Org = Depends(get_current_org),
     _=Depends(require_permission("approvals:decide")),
 ) -> dict:
-    req = session.get(ToolApprovalRequest, request_id)
-    if not req or req.org_id != current_org.id:
-        raise HTTPException(status_code=404, detail="Approval request not found")
-    if req.status != "pending":
-        raise HTTPException(status_code=409, detail=f"Request is already '{req.status}'")
+    req = _decide(
+        session=session,
+        http_request=http_request,
+        current_user=current_user,
+        current_org=current_org,
+        request_id=request_id,
+        totp_code=totp_code,
+        status="approved",
+        decision_mode="approve_once",
+        log_outcome="approved",
+        audit_action="approval.approved_once",
+        posthog_event="tool_approval_approved_once",
+    )
+    return req.model_dump()
 
-    now = datetime.utcnow()
-    if req.expires_at <= now:
-        req.status = "expired"
-        session.add(req)
-        session.commit()
-        raise HTTPException(status_code=410, detail="Approval request has expired")
 
-    require_second_factor(current_user, totp_code)
-    session.add(current_user)
+@router.post("/requests/{request_id}/approve-exact")
+def approve_exact_forever(
+    request_id: uuid.UUID,
+    http_request: Request,
+    totp_code: str | None = Body(default=None, embed=True),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+    current_org: Org = Depends(get_current_org),
+    _=Depends(require_permission("approvals:decide")),
+) -> dict:
+    """Approve this tool with these EXACT arguments, forever.
 
-    req.status = "approved"
-    req.decision_mode = "approve_once"
-    req.decided_by_user_id = current_user.id
-    req.decided_at = now
-    req.approver_ip = http_request.client.host if http_request.client else None
-    session.add(req)
-    _update_pending_log(session, request_id, "approved")
-    session.commit()
-    session.refresh(req)
-    approval_events.notify_decision(request_id, req.status)
-    posthog_client.capture(
-        distinct_id=str(current_user.id),
-        event="tool_approval_approved_once",
-        properties={"integration_id": req.integration_id, "tool_name": req.tool_name},
+    Unlike approve-once the grant is never consumed: future calls whose
+    normalized argument hash matches execute without a new approval, and are
+    logged with access_reason="approved_exact". Any change to the arguments
+    goes back through the approval gate.
+    """
+    req = _decide(
+        session=session,
+        http_request=http_request,
+        current_user=current_user,
+        current_org=current_org,
+        request_id=request_id,
+        totp_code=totp_code,
+        status="approved",
+        decision_mode="approve_exact_forever",
+        log_outcome="approved",
+        audit_action="approval.approved_exact_forever",
+        posthog_event="tool_approval_approved_exact_forever",
     )
     return req.model_dump()
 
@@ -204,21 +318,12 @@ def allow_tool(
     _=Depends(require_permission("approvals:decide")),
 ) -> dict:
     """Approve all future calls to this tool regardless of parameters."""
-    req = session.get(ToolApprovalRequest, request_id)
-    if not req or req.org_id != current_org.id:
-        raise HTTPException(status_code=404, detail="Approval request not found")
-    if req.status != "pending":
-        raise HTTPException(status_code=409, detail=f"Request is already '{req.status}'")
-
-    now = datetime.utcnow()
-    if req.expires_at <= now:
-        req.status = "expired"
-        session.add(req)
-        session.commit()
-        raise HTTPException(status_code=410, detail="Approval request has expired")
+    req = _load_pending_request(session, request_id, current_org.id)
 
     require_second_factor(current_user, totp_code)
     session.add(current_user)
+
+    now = datetime.utcnow()
 
     # Upsert execution setting to "allow" — this is the single source of truth for the
     # tool's policy and is what the ModeControl in the UI reflects.
@@ -228,6 +333,7 @@ def allow_tool(
         .where(ToolExecutionSetting.integration_id == req.integration_id)
         .where(ToolExecutionSetting.tool_name == req.tool_name)
     ).first()
+    old_mode = existing_setting.mode if existing_setting else "require_approval"
     if existing_setting:
         existing_setting.mode = "allow"
         existing_setting.updated_by_user_id = current_user.id
@@ -245,14 +351,35 @@ def allow_tool(
             )
         )
 
-    req.status = "approved"
-    req.decision_mode = "allow_tool_forever"
-    req.policy_created = True
-    req.decided_by_user_id = current_user.id
-    req.decided_at = now
-    req.approver_ip = http_request.client.host if http_request.client else None
-    session.add(req)
+    approver_ip = http_request.client.host if http_request.client else None
+    _transition_pending(
+        session,
+        request_id,
+        now,
+        status="approved",
+        decision_mode="allow_tool_forever",
+        policy_created=True,
+        decided_by_user_id=current_user.id,
+        decided_at=now,
+        approver_ip=approver_ip,
+    )
     _update_pending_log(session, request_id, "approved")
+    record_audit(
+        session,
+        org_id=current_org.id,
+        action="approval.allowed_forever",
+        summary=f"{req.tool_name} on {req.integration_id}: allow_tool_forever",
+        actor_user_id=current_user.id,
+        target_type="approval_request",
+        target_id=str(request_id),
+        metadata={
+            "integration_id": req.integration_id,
+            "tool_name": req.tool_name,
+            "old_mode": old_mode,
+            "new_mode": "allow",
+        },
+        request=http_request,
+    )
     session.commit()
     session.refresh(req)
     approval_events.notify_decision(request_id, req.status)
@@ -274,35 +401,17 @@ def deny_request(
     current_org: Org = Depends(get_current_org),
     _=Depends(require_permission("approvals:decide")),
 ) -> dict:
-    req = session.get(ToolApprovalRequest, request_id)
-    if not req or req.org_id != current_org.id:
-        raise HTTPException(status_code=404, detail="Approval request not found")
-    if req.status != "pending":
-        raise HTTPException(status_code=409, detail=f"Request is already '{req.status}'")
-
-    now = datetime.utcnow()
-    if req.expires_at <= now:
-        req.status = "expired"
-        session.add(req)
-        session.commit()
-        raise HTTPException(status_code=410, detail="Approval request has expired")
-
-    require_second_factor(current_user, totp_code)
-    session.add(current_user)
-
-    req.status = "denied"
-    req.decision_mode = "deny"
-    req.decided_by_user_id = current_user.id
-    req.decided_at = now
-    req.approver_ip = http_request.client.host if http_request.client else None
-    session.add(req)
-    _update_pending_log(session, request_id, "denied")
-    session.commit()
-    session.refresh(req)
-    approval_events.notify_decision(request_id, req.status)
-    posthog_client.capture(
-        distinct_id=str(current_user.id),
-        event="tool_approval_denied",
-        properties={"integration_id": req.integration_id, "tool_name": req.tool_name},
+    req = _decide(
+        session=session,
+        http_request=http_request,
+        current_user=current_user,
+        current_org=current_org,
+        request_id=request_id,
+        totp_code=totp_code,
+        status="denied",
+        decision_mode="deny",
+        log_outcome="denied",
+        audit_action="approval.denied",
+        posthog_event="tool_approval_denied",
     )
     return req.model_dump()

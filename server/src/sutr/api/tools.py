@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
+from sutr.authz import ensure_agent_can
 from sutr.db import get_session
 from sutr.dependencies import AgentAuth, get_agent_auth
 from sutr.models.integration import InstalledIntegration
@@ -110,6 +111,9 @@ async def call_tool(
     agent_auth: AgentAuth = Depends(get_agent_auth),
 ) -> dict:
     current_org = agent_auth.org
+    # Viewers may browse tools but never execute them (API keys keep their
+    # documented capabilities — only human-user contexts are role-checked).
+    ensure_agent_can(session, agent_auth, "tools:execute")
     installed = session.exec(
         select(InstalledIntegration)
         .where(InstalledIntegration.org_id == current_org.id)

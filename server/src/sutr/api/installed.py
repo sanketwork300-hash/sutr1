@@ -14,6 +14,7 @@ from sutr.mcp.refresh import refresh_one
 from sutr.models.integration import InstalledIntegration
 from sutr.models.oauth import OAuthState
 from sutr.secrets.records import delete_secret, upsert_secret
+from sutr.services.audit import actor_from_agent_auth, record_audit
 from sutr.upstream_safety import UnsafeUpstreamUrlError, validate_safe_url
 
 router = APIRouter(prefix="/api/installed", tags=["installed"])
@@ -148,6 +149,16 @@ async def install_integration(
         )
         installed.token_secret_id = secret.id
         session.add(installed)
+    record_audit(
+        session,
+        org_id=agent_auth.org.id,
+        action="integration.installed",
+        summary=f"Integration '{body.integration_id}' installed ({body.auth_method})",
+        target_type="integration",
+        target_id=body.integration_id,
+        metadata={"auth_method": body.auth_method, "source": "api"},
+        **actor_from_agent_auth(agent_auth),
+    )
     session.commit()
     session.refresh(installed)
     if connected:
@@ -260,6 +271,16 @@ def remove_installed(
 
     for sid in secret_ids:
         delete_secret(session, sid)
+    record_audit(
+        session,
+        org_id=agent_auth.org.id,
+        action="integration.uninstalled",
+        summary=f"Integration '{integration_id}' uninstalled",
+        target_type="integration",
+        target_id=integration_id,
+        metadata={"source": "api"},
+        **actor_from_agent_auth(agent_auth),
+    )
     session.commit()
     posthog_client.capture(
         distinct_id=str(agent_auth.org.id),

@@ -14,6 +14,7 @@ from sutr.email.templates import password_reset_email
 from sutr.models.user import User
 from sutr.rate_limit import login_failure_ip_limiter
 from sutr.security import hash_password
+from sutr.services.audit import record_user_security_audit
 
 router = APIRouter(prefix="/api/auth", tags=["password-reset"])
 
@@ -98,5 +99,8 @@ def reset_password(
     user.failed_login_attempts = 0
     user.locked_until = None
     session.add(user)
+    record_user_security_audit(
+        session, user, "auth.password_reset", f"{user.email} reset password via email token"
+    )
     session.commit()
     return MessageResponse(message="Password has been reset successfully")

@@ -24,6 +24,7 @@ from sutr.models.oauth import OAuthState
 from sutr.models.tool_cache import ToolCache
 from sutr.models.tool_execution import ToolExecutionSetting
 from sutr.secrets.records import delete_secret, upsert_secret
+from sutr.services.audit import actor_from_agent_auth, record_audit
 
 logger = logging.getLogger(__name__)
 
@@ -381,7 +382,7 @@ async def _handle_list_installed(org_id) -> list[types.TextContent]:
         return _text([_serialize_installed(r) for r in rows])
 
 
-async def _handle_install(args: dict, org_id) -> list[types.TextContent]:
+async def _handle_install(args: dict, org_id, auth=None) -> list[types.TextContent]:
     integration_id = args.get("integration_id", "")
     auth_method = args.get("auth_method", "")
     token = args.get("token")
@@ -458,6 +459,16 @@ async def _handle_install(args: dict, org_id) -> list[types.TextContent]:
             installed.token_secret_id = secret.id
             db.add(installed)
 
+        record_audit(
+            db,
+            org_id=org_id,
+            action="integration.installed",
+            summary=f"Integration '{integration_id}' installed ({auth_method})",
+            target_type="integration",
+            target_id=integration_id,
+            metadata={"auth_method": auth_method, "source": "mcp"},
+            **(actor_from_agent_auth(auth) if auth else {"actor_type": "system"}),
+        )
         db.commit()
         db.refresh(installed)
 
@@ -510,7 +521,7 @@ async def _handle_install(args: dict, org_id) -> list[types.TextContent]:
         )
 
 
-async def _handle_uninstall(args: dict, org_id) -> list[types.TextContent]:
+async def _handle_uninstall(args: dict, org_id, auth=None) -> list[types.TextContent]:
     integration_id = args.get("integration_id", "")
     with Session(engine) as db:
         installed = db.exec(
@@ -536,6 +547,16 @@ async def _handle_uninstall(args: dict, org_id) -> list[types.TextContent]:
             delete_secret(db, installed.token_secret_id)
 
         db.delete(installed)
+        record_audit(
+            db,
+            org_id=org_id,
+            action="integration.uninstalled",
+            summary=f"Integration '{integration_id}' uninstalled",
+            target_type="integration",
+            target_id=integration_id,
+            metadata={"source": "mcp"},
+            **(actor_from_agent_auth(auth) if auth else {"actor_type": "system"}),
+        )
         db.commit()
 
     await notify_tools_changed(org_id)
@@ -826,8 +847,8 @@ async def dispatch(name: str, arguments: dict, auth) -> list[types.TextContent]:
         "sutr__list_available_integrations": lambda: _handle_list_available(arguments, org_id),
         "sutr__get_integration": lambda: _handle_get_integration(arguments, org_id),
         "sutr__list_installed_integrations": lambda: _handle_list_installed(org_id),
-        "sutr__install_integration": lambda: _handle_install(arguments, org_id),
-        "sutr__uninstall_integration": lambda: _handle_uninstall(arguments, org_id),
+        "sutr__install_integration": lambda: _handle_install(arguments, org_id, auth),
+        "sutr__uninstall_integration": lambda: _handle_uninstall(arguments, org_id, auth),
         "sutr__get_auth_status": lambda: _handle_get_auth_status(arguments, org_id),
         "sutr__start_oauth_flow": lambda: _handle_start_oauth_flow(arguments, org_id),
         "sutr__list_integration_tools": lambda: _handle_list_integration_tools(arguments, org_id),

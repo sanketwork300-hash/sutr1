@@ -7,6 +7,7 @@ from sutr.db import get_session
 from sutr.dependencies import get_current_user, get_impersonator
 from sutr.models.user import User
 from sutr.security import hash_password, verify_password
+from sutr.services.audit import record_user_security_audit
 
 router = APIRouter(prefix="/api/users/me", tags=["password"])
 
@@ -50,5 +51,8 @@ def change_password(
     # making this request) — the UI re-authenticates after a password change.
     current_user.token_version = (current_user.token_version or 0) + 1
     session.add(current_user)
+    record_user_security_audit(
+        session, current_user, "auth.password_changed", f"{current_user.email} changed password"
+    )
     session.commit()
     return MessageResponse(message="Password changed successfully")

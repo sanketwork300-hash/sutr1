@@ -19,6 +19,7 @@ from sutr.api.schemas import MessageResponse
 from sutr.db import get_session
 from sutr.dependencies import get_current_user, get_impersonator
 from sutr.models.user import User
+from sutr.services.audit import record_user_security_audit
 from sutr.totp import (
     generate_recovery_codes,
     generate_secret,
@@ -155,6 +156,9 @@ def enable(
     if is_first_confirmation:
         current_user.totp_confirmed_at = datetime.now(timezone.utc).replace(tzinfo=None)
     session.add(current_user)
+    record_user_security_audit(
+        session, current_user, "auth.totp_enabled", f"{current_user.email} enabled TOTP"
+    )
     session.commit()
 
     posthog_client.capture(
@@ -186,6 +190,9 @@ def re_enable(
     _require_existing_second_factor(current_user, body.code)
     current_user.totp_enabled = True
     session.add(current_user)
+    record_user_security_audit(
+        session, current_user, "auth.totp_enabled", f"{current_user.email} re-enabled TOTP"
+    )
     session.commit()
     posthog_client.capture(
         distinct_id=str(current_user.id),
@@ -211,6 +218,9 @@ def disable(
     _require_existing_second_factor(current_user, body.code)
     current_user.totp_enabled = False
     session.add(current_user)
+    record_user_security_audit(
+        session, current_user, "auth.totp_disabled", f"{current_user.email} disabled TOTP"
+    )
     session.commit()
     posthog_client.capture(
         distinct_id=str(current_user.id),

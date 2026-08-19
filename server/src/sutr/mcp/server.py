@@ -15,6 +15,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 
+from fastapi import HTTPException
 from mcp import types
 from mcp.server import Server
 from mcp.server.lowlevel.server import NotificationOptions
@@ -23,6 +24,7 @@ from sqlmodel import Session, select
 
 from sutr.approvals import events as approval_events
 from sutr.approvals.requests import try_consume_approved_request
+from sutr.authz import ensure_agent_can
 from sutr.config import settings
 from sutr.db import engine
 from sutr.mcp import management_tools
@@ -171,6 +173,13 @@ async def execute_upstream_tool(
     ctx = _pipeline_context(additional_info)
 
     with Session(engine) as session:
+        # Viewers may browse tools but never execute them (API keys carry no
+        # role and keep their documented capabilities).
+        try:
+            ensure_agent_can(session, _current_auth.get(), "tools:execute")
+        except HTTPException:
+            return _text("Your role does not allow executing tools (tools:execute).")
+
         installed = session.exec(
             select(InstalledIntegration)
             .where(InstalledIntegration.org_id == ctx.org_id)
@@ -272,7 +281,11 @@ async def await_approval(request_id: uuid.UUID) -> list[types.TextContent]:
             return _text(f"Approval request '{request_id}' not found.")
         if req.status == "denied":
             return _text("This tool call was denied by the human.")
-        if req.status == "expired" or req.expires_at <= datetime.utcnow():
+        # Exact-forever grants are permanent — the request-expiry window only
+        # bounds how long an *undecided* request stays actionable.
+        if req.decision_mode != "approve_exact_forever" and (
+            req.status == "expired" or req.expires_at <= datetime.utcnow()
+        ):
             return _text(
                 "Still pending — the human hasn't decided yet. Call "
                 f'sutr__await_approval(request_id="{request_id}") again to '
@@ -290,31 +303,46 @@ async def await_approval(request_id: uuid.UUID) -> list[types.TextContent]:
 
     ctx = _pipeline_context(additional_info)
 
-    # Consume the approve_once record (atomic state transition). For
-    # allow_tool_forever / auto_approved the agent should just call the tool
-    # directly — but we handle approve_once here since that is the whole
-    # point of this flow.
+    # Consume the approve_once record (atomic state transition), or execute
+    # under a standing approve-exact-forever grant. For allow_tool_forever /
+    # auto_approved the agent should just call the tool directly.
     with Session(engine) as session:
-        consumed = try_consume_approved_request(
-            session, org.id, integration_id, tool_name, args_hash
-        )
-        if consumed is None:
-            # Either already consumed (double-wait race) or not of decision_mode
-            # approve_once. Fall back to "share the decision" rather than
-            # attempting to execute twice.
-            return _text(
-                "The approval was recorded but can no longer be consumed here "
-                "(it may have been used already). Retry the original "
-                "sutr__call_tool call if you still need the tool to run."
+        try:
+            ensure_agent_can(session, _current_auth.get(), "tools:execute")
+        except HTTPException:
+            return _text("Your role does not allow executing tools (tools:execute).")
+
+        req = session.get(ToolApprovalRequest, request_id)
+        if req is not None and req.decision_mode == "approve_exact_forever":
+            gate_log = find_gate_log(session, req.id)
+            gate = GateResult(
+                status="ready",
+                args_hash=args_hash,
+                access_reason="approved_exact",
+                approval_request_id=req.id,
+                pending_log_id=gate_log.id if gate_log else None,
             )
-        gate_log = find_gate_log(session, consumed.id)
-        gate = GateResult(
-            status="ready",
-            args_hash=args_hash,
-            access_reason="approved_once",
-            approval_request_id=consumed.id,
-            pending_log_id=gate_log.id if gate_log else None,
-        )
+        else:
+            consumed = try_consume_approved_request(
+                session, org.id, integration_id, tool_name, args_hash
+            )
+            if consumed is None:
+                # Either already consumed (double-wait race) or not of
+                # decision_mode approve_once. Fall back to "share the decision"
+                # rather than attempting to execute twice.
+                return _text(
+                    "The approval was recorded but can no longer be consumed here "
+                    "(it may have been used already). Retry the original "
+                    "sutr__call_tool call if you still need the tool to run."
+                )
+            gate_log = find_gate_log(session, consumed.id)
+            gate = GateResult(
+                status="ready",
+                args_hash=args_hash,
+                access_reason="approved_once",
+                approval_request_id=consumed.id,
+                pending_log_id=gate_log.id if gate_log else None,
+            )
 
     outcome = await execute_tool(ctx, integration_id, tool_name, arguments, gate)
     return _outcome_to_contents(outcome)

@@ -49,6 +49,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "api_keys:manage": frozenset({"owner", "admin", "developer"}),
     # Read logs and approval history.
     "logs:read": _ALL,
+    # Read the control-plane audit trail.
+    "audit:read": frozenset({"owner", "admin"}),
 }
 
 

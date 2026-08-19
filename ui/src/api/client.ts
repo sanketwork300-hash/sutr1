@@ -689,6 +689,12 @@ export const api = {
         body: JSON.stringify({ totp_code: totp_code ?? null }),
       })
     },
+    approveExact(id: string, totp_code?: string) {
+      return request<ApprovalRequest>(`/tool-approvals/requests/${id}/approve-exact`, {
+        method: 'POST',
+        body: JSON.stringify({ totp_code }),
+      })
+    },
     allowTool(id: string, totp_code?: string) {
       return request<ApprovalRequest>(`/tool-approvals/requests/${id}/allow-tool`, {
         method: 'POST',

@@ -1,11 +1,19 @@
 import uuid
 from datetime import datetime
 
+from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
 
 
 class LogEntry(SQLModel, table=True):
     __tablename__ = "log_entry"
+    # Composite indexes matching the /api/logs filters (always org-scoped).
+    __table_args__ = (
+        Index("ix_log_entry_org_integration", "org_id", "integration_id"),
+        Index("ix_log_entry_org_tool", "org_id", "tool_name"),
+        Index("ix_log_entry_org_outcome", "org_id", "outcome"),
+        Index("ix_log_entry_org_timestamp", "org_id", "timestamp"),
+    )
 
     id: int | None = Field(default=None, primary_key=True)
     org_id: uuid.UUID = Field(foreign_key="org.id", index=True)
