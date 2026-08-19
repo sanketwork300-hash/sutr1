@@ -50,7 +50,7 @@ export default function BillingPage() {
   useEffect(() => {
     const checkout = searchParams.get('checkout')
     if (checkout === 'success') {
-      setBanner("You're on AgentPort Plus — thanks for subscribing!")
+      setBanner("You're on Sutr Plus — thanks for subscribing!")
       searchParams.delete('checkout')
       setSearchParams(searchParams, { replace: true })
     } else if (checkout === 'cancel') {
@@ -86,7 +86,7 @@ export default function BillingPage() {
 
   const isPlus = sub?.tier === 'plus'
   const mailto = sub
-    ? `mailto:${sub.enterprise_contact_email}?subject=${encodeURIComponent('AgentPort Enterprise')}`
+    ? `mailto:${sub.enterprise_contact_email}?subject=${encodeURIComponent('Sutr Enterprise')}`
     : '#'
 
   return (
@@ -206,7 +206,7 @@ function CurrentPlanPanel({
   onManage: () => void
   pending: boolean
 }) {
-  const tierLabel = sub.tier === 'plus' ? 'AgentPort Plus' : 'AgentPort Free'
+  const tierLabel = sub.tier === 'plus' ? 'Sutr Plus' : 'Sutr Free'
   const renewalDate = sub.current_period_end
     ? new Date(sub.current_period_end).toLocaleDateString(undefined, {
         year: 'numeric',

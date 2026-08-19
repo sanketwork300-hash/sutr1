@@ -1,6 +1,6 @@
 import pytest
 
-from agent_port.models.log import LogEntry
+from sutr.models.log import LogEntry
 
 
 @pytest.mark.anyio

@@ -9,9 +9,9 @@ from alembic.config import Config as AlembicConfig
 from alembic.script import ScriptDirectory
 from httpx import ASGITransport, AsyncClient
 
-import agent_port.main as main_module
-from agent_port.config import settings
-from agent_port.main import app, check_database_schema
+import sutr.main as main_module
+from sutr.config import settings
+from sutr.main import app, check_database_schema
 
 
 def _migration_head() -> str:
@@ -87,7 +87,7 @@ def test_check_database_schema_passes_at_head(session, monkeypatch):
     monkeypatch.setattr(settings, "dev", False)
     head = _migration_head()
 
-    from agent_port import db as db_module
+    from sutr import db as db_module
 
     with db_module.engine.begin() as conn:
         conn.exec_driver_sql("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")

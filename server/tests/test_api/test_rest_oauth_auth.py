@@ -6,12 +6,12 @@ import jwt
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from agent_port.config import settings
-from agent_port.db import get_session
-from agent_port.main import app
-from agent_port.mcp.asgi import _authenticate
-from agent_port.mcp.oauth_provider import _issue_access_token, _issue_refresh_token, oauth_provider
-from agent_port.models.oauth_revoked_token import OAuthRevokedToken
+from sutr.config import settings
+from sutr.db import get_session
+from sutr.main import app
+from sutr.mcp.asgi import _authenticate
+from sutr.mcp.oauth_provider import _issue_access_token, _issue_refresh_token, oauth_provider
+from sutr.models.oauth_revoked_token import OAuthRevokedToken
 
 
 def _override_session(session):

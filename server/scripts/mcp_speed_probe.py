@@ -1,4 +1,4 @@
-"""Measure AgentPort MCP latency by stage.
+"""Measure Sutr MCP latency by stage.
 
 Run from server/:
 
@@ -212,9 +212,9 @@ def _parse_arguments(raw: str) -> dict[str, Any]:
 def _resolve_org_id(args: argparse.Namespace) -> uuid.UUID | None:
     from sqlmodel import Session, select
 
-    from agent_port.db import engine
-    from agent_port.models.api_key import ApiKey
-    from agent_port.models.org import Org
+    from sutr.db import engine
+    from sutr.models.api_key import ApiKey
+    from sutr.models.org import Org
 
     if args.org_id:
         return uuid.UUID(args.org_id)
@@ -240,9 +240,9 @@ def _resolve_org_id(args: argparse.Namespace) -> uuid.UUID | None:
 def _load_cache_rows(args: argparse.Namespace) -> list[CacheRow]:
     from sqlmodel import Session, select
 
-    from agent_port.db import engine
-    from agent_port.models.integration import InstalledIntegration
-    from agent_port.models.tool_cache import ToolCache
+    from sutr.db import engine
+    from sutr.models.integration import InstalledIntegration
+    from sutr.models.tool_cache import ToolCache
 
     org_id = _resolve_org_id(args)
     if org_id is None:
@@ -311,9 +311,9 @@ def _cache_detail(rows: list[CacheRow]) -> list[dict[str, Any]]:
 def _load_installed_for_direct_probe(args: argparse.Namespace):
     from sqlmodel import Session, select
 
-    from agent_port.db import engine
-    from agent_port.models.integration import InstalledIntegration
-    from agent_port.models.oauth import OAuthState
+    from sutr.db import engine
+    from sutr.models.integration import InstalledIntegration
+    from sutr.models.oauth import OAuthState
 
     org_id = _resolve_org_id(args)
     if org_id is None:
@@ -347,10 +347,10 @@ def _load_installed_for_direct_probe(args: argparse.Namespace):
 
 
 async def _direct_upstream_list_tools(args: argparse.Namespace) -> list[dict[str, Any]]:
-    from agent_port import api_client
-    from agent_port.integrations import registry as integration_registry
-    from agent_port.integrations.types import CustomIntegration
-    from agent_port.mcp import client as mcp_client
+    from sutr import api_client
+    from sutr.integrations import registry as integration_registry
+    from sutr.integrations.types import CustomIntegration
+    from sutr.mcp import client as mcp_client
 
     installed, oauth_state = _load_installed_for_direct_probe(args)
     bundled = integration_registry.get(installed.integration_id, org_id=installed.org_id)
@@ -429,7 +429,7 @@ async def _run_mcp_probes(args: argparse.Namespace) -> list[ProbeResult]:
                 results.append(
                     await _measure(
                         "mcp.warm.call:list_installed_integrations",
-                        lambda: session.call_tool("agentport__list_installed_integrations", {}),
+                        lambda: session.call_tool("sutr__list_installed_integrations", {}),
                         iterations=args.iterations,
                         warmup=args.warmup,
                         detail_fn=_mcp_call_detail,
@@ -444,7 +444,7 @@ async def _run_mcp_probes(args: argparse.Namespace) -> list[ProbeResult]:
                 results.append(
                     await _measure(
                         list_name,
-                        lambda: session.call_tool("agentport__list_integration_tools", list_args),
+                        lambda: session.call_tool("sutr__list_integration_tools", list_args),
                         iterations=args.iterations,
                         warmup=args.warmup,
                         detail_fn=_mcp_call_detail,
@@ -459,7 +459,7 @@ async def _run_mcp_probes(args: argparse.Namespace) -> list[ProbeResult]:
                     results.append(
                         await _measure(
                             f"mcp.warm.call:describe_tool({args.integration_id}/{args.tool_name})",
-                            lambda: session.call_tool("agentport__describe_tool", describe_args),
+                            lambda: session.call_tool("sutr__describe_tool", describe_args),
                             iterations=args.iterations,
                             warmup=args.warmup,
                             detail_fn=_mcp_call_detail,
@@ -478,7 +478,7 @@ async def _run_mcp_probes(args: argparse.Namespace) -> list[ProbeResult]:
                     results.append(
                         await _measure(
                             f"mcp.warm.call:call_tool({args.integration_id}/{args.tool_name})",
-                            lambda: session.call_tool("agentport__call_tool", call_args),
+                            lambda: session.call_tool("sutr__call_tool", call_args),
                             iterations=args.iterations,
                             warmup=args.warmup,
                             detail_fn=_mcp_call_detail,
@@ -616,9 +616,9 @@ def _print_interpretation(results: list[ProbeResult]) -> None:
         direct_ms = direct[0].percentile(50) or 0
         gateway_ms = mcp_list[0].percentile(50) or 0
         if direct_ms > gateway_ms * 2:
-            print("- Upstream tool discovery is slower than the AgentPort cached path.")
+            print("- Upstream tool discovery is slower than the Sutr cached path.")
         elif gateway_ms > direct_ms * 2:
-            print("- AgentPort cache, policy, DB, or MCP wrapping is slower than direct upstream.")
+            print("- Sutr cache, policy, DB, or MCP wrapping is slower than direct upstream.")
 
     rest_all = by_name.get("rest.GET /api/tools")
     if rest_all and rest_all.percentile(50) and rest_all.percentile(50) > 1000:
@@ -630,24 +630,22 @@ def _print_interpretation(results: list[ProbeResult]) -> None:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description=(
-            "Profile AgentPort MCP latency across transport, cache, REST, and upstream stages."
-        )
+        description=("Profile Sutr MCP latency across transport, cache, REST, and upstream stages.")
     )
     parser.add_argument(
         "--server-url",
-        default=os.getenv("AGENTPORT_BASE_URL") or os.getenv("BASE_URL") or "http://localhost:4747",
-        help="AgentPort base URL, without /mcp. Defaults to AGENTPORT_BASE_URL or localhost.",
+        default=os.getenv("SUTR_BASE_URL") or os.getenv("BASE_URL") or "http://localhost:4747",
+        help="Sutr base URL, without /mcp. Defaults to SUTR_BASE_URL or localhost.",
     )
     parser.add_argument(
         "--api-key",
-        default=os.getenv("AGENTPORT_API_KEY"),
-        help="AgentPort API key. Defaults to AGENTPORT_API_KEY.",
+        default=os.getenv("SUTR_API_KEY"),
+        help="Sutr API key. Defaults to SUTR_API_KEY.",
     )
     parser.add_argument(
         "--bearer-token",
-        default=os.getenv("AGENTPORT_BEARER_TOKEN"),
-        help="Bearer token alternative to --api-key. Defaults to AGENTPORT_BEARER_TOKEN.",
+        default=os.getenv("SUTR_BEARER_TOKEN"),
+        help="Bearer token alternative to --api-key. Defaults to SUTR_BEARER_TOKEN.",
     )
     parser.add_argument(
         "--org-id",
@@ -664,7 +662,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--call-tool",
         action="store_true",
-        help="Actually invoke --integration-id/--tool-name through agentport__call_tool.",
+        help="Actually invoke --integration-id/--tool-name through sutr__call_tool.",
     )
     parser.add_argument(
         "--direct-upstream",
@@ -691,7 +689,7 @@ async def _main_async(args: argparse.Namespace) -> int:
     needs_endpoint_auth = not args.skip_mcp or not args.skip_rest
     if needs_endpoint_auth and not args.api_key and not args.bearer_token:
         print(
-            "No auth provided. Pass --api-key, --bearer-token, or set AGENTPORT_API_KEY.",
+            "No auth provided. Pass --api-key, --bearer-token, or set SUTR_API_KEY.",
             file=sys.stderr,
         )
         return 2
@@ -731,7 +729,7 @@ async def _main_async(args: argparse.Namespace) -> int:
         )
         return 0
 
-    print("AgentPort MCP speed probe")
+    print("Sutr MCP speed probe")
     print(f"server_url={args.server_url}")
     print(f"mcp_url={_mcp_url(args.server_url)}")
     print(f"headers={_redacted_header_map(args)}")

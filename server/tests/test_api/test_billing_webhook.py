@@ -7,9 +7,9 @@ from types import SimpleNamespace
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from agent_port.config import settings
-from agent_port.main import app
-from agent_port.models.subscription import Subscription
+from sutr.config import settings
+from sutr.main import app
+from sutr.models.subscription import Subscription
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def billing_on(monkeypatch):
 @pytest.fixture
 def anon_client(session, billing_on):
     """Webhook endpoint has no auth overrides."""
-    from agent_port.db import get_session
+    from sutr.db import get_session
 
     def override_session():
         yield session
@@ -41,7 +41,7 @@ def anon_client(session, billing_on):
 def _stub_construct_event(monkeypatch, event_payload):
     """Make stripe.Webhook.construct_event return our payload unchanged."""
     monkeypatch.setattr(
-        "agent_port.api.billing.stripe.Webhook.construct_event",
+        "sutr.api.billing.stripe.Webhook.construct_event",
         lambda payload, sig_header, secret: event_payload,
     )
 
@@ -70,7 +70,7 @@ async def test_webhook_rejects_invalid_signature(anon_client, monkeypatch):
     def _raise(payload, sig_header, secret):
         raise stripe_mod.SignatureVerificationError("bad sig", sig_header)
 
-    monkeypatch.setattr("agent_port.api.billing.stripe.Webhook.construct_event", _raise)
+    monkeypatch.setattr("sutr.api.billing.stripe.Webhook.construct_event", _raise)
 
     client = await anon_client()
     async with client:
@@ -91,7 +91,7 @@ async def test_webhook_checkout_completed_upserts_plus(anon_client, session, tes
         cancel_at_period_end=False,
     )
     monkeypatch.setattr(
-        "agent_port.billing.webhook.stripe.Subscription.retrieve",
+        "sutr.billing.webhook.stripe.Subscription.retrieve",
         lambda sub_id: stripe_sub_obj,
     )
 
@@ -399,7 +399,7 @@ async def test_webhook_idempotent_on_replay(anon_client, session, test_org, monk
         cancel_at_period_end=False,
     )
     monkeypatch.setattr(
-        "agent_port.billing.webhook.stripe.Subscription.retrieve",
+        "sutr.billing.webhook.stripe.Subscription.retrieve",
         lambda sub_id: stripe_sub_obj,
     )
 
@@ -447,7 +447,7 @@ async def test_webhook_handles_stripe_object_payload(anon_client, session, test_
         cancel_at_period_end=False,
     )
     monkeypatch.setattr(
-        "agent_port.billing.webhook.stripe.Subscription.retrieve",
+        "sutr.billing.webhook.stripe.Subscription.retrieve",
         lambda sub_id: stripe_sub_obj,
     )
 
@@ -520,7 +520,7 @@ async def test_webhook_404_when_billing_disabled(session, monkeypatch):
     monkeypatch.setattr(settings, "stripe_api_key", "")
     monkeypatch.setattr(settings, "stripe_price_plus", "")
 
-    from agent_port.db import get_session
+    from sutr.db import get_session
 
     def override_session():
         yield session

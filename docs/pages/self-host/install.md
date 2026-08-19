@@ -3,9 +3,9 @@ title: Install
 nav_title: Install
 ---
 
-# Installing AgentPort
+# Installing Sutr
 
-You can deploy AgentPort in just a few minutes on a VPS using Docker Compose.
+You can deploy Sutr in just a few minutes on a VPS using Docker Compose.
 
 We'll provision everything for you, including setting up reverse proxying with TLS certificates for a domain you choose.
 
@@ -24,12 +24,12 @@ The vast majority of integrations will work out of the box without any extra con
 SSH into the instance and run:
 
 ```sh
-curl -fsSL https://install.agentport.sh | sh
+curl -fsSL https://install.sutr.sh | sh
 ```
 
 The script will:
 
-1. Clone the repo into `./agentport`.
+1. Clone the repo into `./sutr`.
 2. Print this host's public IP and ask you to point your domain's **A record** at it.
 3. Prompt for the **domain** and an **email address** for Let's Encrypt.
 4. Poll DNS (via Cloudflare DoH, so it bypasses your local resolver's cache) until the domain resolves to this host.
@@ -42,11 +42,11 @@ Caddy provisions the TLS certificate on the first HTTPS request, usually within 
 If you'd rather do it yourself:
 
 ```sh
-git clone https://github.com/yakkomajuri/agent-port.git
-cd agent-port
+git clone https://github.com/sutr-dev/sutr.git
+cd sutr
 
 cat > .env <<EOF
-DOMAIN=agentport.example.com
+DOMAIN=sutr.example.com
 LETSENCRYPT_EMAIL=you@example.com
 JWT_SECRET_KEY=$(openssl rand -hex 32)
 EOF
@@ -59,12 +59,12 @@ Note that for this to work the DNS A record for `DOMAIN` must already resolve to
 
 ## Verifying it's up
 
-From the `agentport` directory, run:
+From the `sutr` directory, run:
 
 ```sh
 docker compose -f docker-compose.prod.yml ps
 docker compose -f docker-compose.prod.yml logs -f
-curl -sSf https://agentport.example.com/health
+curl -sSf https://sutr.example.com/health
 ```
 
 Then open the domain in a browser and create your account. We automatically block any other signups after the first signup on self-hosted deploys. 
@@ -72,7 +72,7 @@ Then open the domain in a browser and create your account. We automatically bloc
 ## Updating
 
 ```sh
-cd agentport
+cd sutr
 git pull
 docker compose -f docker-compose.prod.yml up -d --build
 ```
@@ -85,7 +85,7 @@ Migrations run automatically on container start.
 docker compose -f docker-compose.prod.yml down
 ```
 
-Data lives in the `agentport_data` and `caddy_data` Docker volumes — back them up first if you want to keep anything. See [Configuration → Backups](/self-host/configure#backups).
+Data lives in the `sutr_data` and `caddy_data` Docker volumes — back them up first if you want to keep anything. See [Configuration → Backups](/self-host/configure#backups).
 
 ## Next steps
 

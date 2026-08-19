@@ -9,10 +9,10 @@ interface ThemeState {
 
 function applyTheme(theme: Theme) {
   document.documentElement.setAttribute('data-theme', theme)
-  localStorage.setItem('agent_port_theme', theme)
+  localStorage.setItem('sutr_theme', theme)
 }
 
-const stored = (localStorage.getItem('agent_port_theme') as Theme) || 'light'
+const stored = (localStorage.getItem('sutr_theme') as Theme) || 'light'
 applyTheme(stored)
 
 export const useThemeStore = create<ThemeState>((set) => ({

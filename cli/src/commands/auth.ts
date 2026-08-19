@@ -4,12 +4,12 @@ import { request } from "../client.js";
 import { print, printError, resolveFormat } from "../output.js";
 
 export const authCommand = new Command("auth").description(
-  "Authenticate the CLI with AgentPort",
+  "Authenticate the CLI with Sutr",
 );
 
 authCommand
   .command("set-instance-url")
-  .description("Point the CLI at a different AgentPort instance")
+  .description("Point the CLI at a different Sutr instance")
   .argument("<url>", "Server URL (e.g. https://ap.example.com)")
   .option("-o, --output <format>", "Output format")
   .action((url: string, opts: { output: string }) => {

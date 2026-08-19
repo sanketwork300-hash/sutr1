@@ -1,7 +1,7 @@
 import pyotp
 import pytest
 
-from agent_port.totp import generate_recovery_codes, hash_recovery_codes
+from sutr.totp import generate_recovery_codes, hash_recovery_codes
 
 
 @pytest.mark.anyio

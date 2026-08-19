@@ -5,13 +5,13 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from agent_port.auth_tokens import (
+from sutr.auth_tokens import (
     create_access_token,
     create_email_verification_session_token,
 )
-from agent_port.db import get_session
-from agent_port.main import app
-from agent_port.rate_limit import reset_all_rate_limiters
+from sutr.db import get_session
+from sutr.main import app
+from sutr.rate_limit import reset_all_rate_limiters
 
 
 @pytest.fixture(autouse=True)
@@ -64,7 +64,7 @@ async def test_resend_verification_when_unverified(client, test_user, session, m
     session.add(test_user)
     session.commit()
 
-    mock_send = mocker.patch("agent_port.email.verification.send_email")
+    mock_send = mocker.patch("sutr.email.verification.send_email")
     resp = await client.post("/api/auth/resend-verification")
     assert resp.status_code == 200
     assert resp.json()["message"] == "Verification email sent"
@@ -135,7 +135,7 @@ async def test_resend_verification_is_rate_limited(client, test_user, session, m
     session.add(test_user)
     session.commit()
 
-    mock_send = mocker.patch("agent_port.email.verification.send_email")
+    mock_send = mocker.patch("sutr.email.verification.send_email")
     first = await client.post("/api/auth/resend-verification")
     second = await client.post("/api/auth/resend-verification")
 
@@ -154,7 +154,7 @@ async def test_resend_verification_code_uses_verification_session(
     session.add(test_user)
     session.commit()
 
-    mock_send = mocker.patch("agent_port.email.verification.send_email")
+    mock_send = mocker.patch("sutr.email.verification.send_email")
     verification_token = create_email_verification_session_token(str(test_user.id))
     resp = await client.post(
         "/api/auth/resend-verification-code",
@@ -276,7 +276,7 @@ async def test_send_verification_email_resets_attempts(client, test_user, sessio
     session.add(test_user)
     session.commit()
 
-    mocker.patch("agent_port.email.verification.send_email")
+    mocker.patch("sutr.email.verification.send_email")
     resp = await client.post("/api/auth/resend-verification")
     assert resp.status_code == 200
 
@@ -295,7 +295,7 @@ async def test_resend_after_burn_bypasses_cooldown(client, test_user, session, m
     session.add(test_user)
     session.commit()
 
-    mock_send = mocker.patch("agent_port.email.verification.send_email")
+    mock_send = mocker.patch("sutr.email.verification.send_email")
     verification_token = create_email_verification_session_token(str(test_user.id))
     resp = await client.post(
         "/api/auth/resend-verification-code",

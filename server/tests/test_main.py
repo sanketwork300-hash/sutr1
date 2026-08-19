@@ -5,8 +5,8 @@ from fastapi import FastAPI
 from fastapi.middleware.gzip import GZipMiddleware
 from httpx import ASGITransport, AsyncClient
 
-from agent_port.config import settings
-from agent_port.main import (
+from sutr.config import settings
+from sutr.main import (
     ASSET_CACHE_CONTROL,
     HTML_CACHE_CONTROL,
     _ImmutableAssetStaticFiles,
@@ -42,7 +42,7 @@ def test_app_enables_gzip_middleware():
 async def test_immutable_asset_static_files_adds_cache_control(tmp_path: Path):
     asset_dir = tmp_path / "assets"
     asset_dir.mkdir()
-    (asset_dir / "app.js").write_text("console.log('AgentPort')")
+    (asset_dir / "app.js").write_text("console.log('Sutr')")
 
     test_app = FastAPI()
     test_app.mount("/assets", _ImmutableAssetStaticFiles(directory=asset_dir), name="assets")

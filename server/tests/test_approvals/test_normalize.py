@@ -1,4 +1,4 @@
-from agent_port.approvals.normalize import hash_normalized_args, normalize_tool_args
+from sutr.approvals.normalize import hash_normalized_args, normalize_tool_args
 
 
 def test_stable_key_order():

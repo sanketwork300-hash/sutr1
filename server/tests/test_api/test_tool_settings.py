@@ -4,8 +4,8 @@ from datetime import datetime
 import pyotp
 import pytest
 
-from agent_port.models.tool_execution import ToolExecutionSetting
-from agent_port.totp import generate_recovery_codes, hash_recovery_codes
+from sutr.models.tool_execution import ToolExecutionSetting
+from sutr.totp import generate_recovery_codes, hash_recovery_codes
 
 
 def _enable_totp(test_user, session) -> str:

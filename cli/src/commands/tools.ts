@@ -35,7 +35,7 @@ function parseTimeoutSeconds(raw: string, flag: string): number {
 
 function extractRequestId(approvalUrl: string): string {
   try {
-    const parsed = new URL(approvalUrl, "https://agentport.invalid");
+    const parsed = new URL(approvalUrl, "https://sutr.invalid");
     const parts = parsed.pathname.replace(/\/+$/, "").split("/");
     const requestId = parts.at(-1);
     if (!requestId) {
@@ -198,6 +198,7 @@ toolsCommand
 
 toolsCommand
   .command("call")
+  .alias("run")
   .description("Call a tool")
   .requiredOption("--integration <id>", "Integration ID")
   .requiredOption("--tool <tool>", "Tool name")

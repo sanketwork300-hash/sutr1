@@ -10,16 +10,16 @@ import pytest
 from fastapi import HTTPException
 from sqlmodel import select
 
-from agent_port import dependencies as deps
-from agent_port.auth_tokens import create_access_token
-from agent_port.maintenance import run_maintenance_sweep
-from agent_port.models.oauth_revoked_token import OAuthRevokedToken
-from agent_port.models.org import Org
-from agent_port.models.org_membership import OrgMembership
-from agent_port.models.tool_approval_request import ToolApprovalRequest
-from agent_port.models.user import User
-from agent_port.security import hash_password
-from agent_port.totp import generate_secret
+from sutr import dependencies as deps
+from sutr.auth_tokens import create_access_token
+from sutr.maintenance import run_maintenance_sweep
+from sutr.models.oauth_revoked_token import OAuthRevokedToken
+from sutr.models.org import Org
+from sutr.models.org_membership import OrgMembership
+from sutr.models.tool_approval_request import ToolApprovalRequest
+from sutr.models.user import User
+from sutr.security import hash_password
+from sutr.totp import generate_secret
 
 
 async def test_logout_revokes_token(client, session, test_user):

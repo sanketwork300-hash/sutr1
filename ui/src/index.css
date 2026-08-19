@@ -4,7 +4,7 @@
 
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
-/* ── Agent-port design tokens (konduktor design system) ── */
+/* ── Sutr design tokens (konduktor design system) ── */
 :root {
   --logo-invert-filter: none;
   --bg: #f5f5f5;

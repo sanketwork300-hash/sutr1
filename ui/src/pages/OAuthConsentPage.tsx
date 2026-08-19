@@ -97,7 +97,7 @@ export default function OAuthConsentPage() {
           <h1 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)', margin: '0 0 4px' }}>
             Authorize access
           </h1>
-          <p style={{ fontSize: 12, color: 'var(--text-faint)', margin: 0 }}>AgentPort</p>
+          <p style={{ fontSize: 12, color: 'var(--text-faint)', margin: 0 }}>Sutr</p>
         </div>
 
         {loading && (
@@ -183,7 +183,7 @@ export default function OAuthConsentPage() {
           </p>
         )}
       </div>
-      <p style={footerStyle}>AgentPort</p>
+      <p style={footerStyle}>Sutr</p>
     </div>
   )
 }

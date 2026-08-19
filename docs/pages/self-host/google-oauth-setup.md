@@ -10,7 +10,7 @@ The Gmail and Google Calendar integrations share a single Google OAuth app. You 
 
 1. Go to [console.cloud.google.com](https://console.cloud.google.com) and sign in.
 2. Click the project selector at the top → **New Project**.
-3. Give it a name (e.g. `AgentPort`) and click **Create**.
+3. Give it a name (e.g. `Sutr`) and click **Create**.
 
 ## 2. Enable the APIs
 
@@ -29,7 +29,7 @@ The consent screen wizard has four steps: **App info → Scopes → Test users �
 1. Go to **APIs & Services → OAuth consent screen**.
 2. Choose **External** (or Internal if this is a Google Workspace org where all users are in the same org).
 3. Fill in the required fields:
-   - **App name** — anything, e.g. `AgentPort`
+   - **App name** — anything, e.g. `Sutr`
    - **User support email** — your email
    - **Developer contact email** — your email
 4. Click **Save and Continue**.
@@ -42,7 +42,7 @@ The consent screen wizard has four steps: **App info → Scopes → Test users �
 3. Click **Update** to confirm, then **Save and Continue**.
 
 **Test users:**
-Add the Google account(s) that will connect to AgentPort. While the app is in Testing mode only these accounts can authorize — you can leave it in Testing indefinitely for personal or team use.
+Add the Google account(s) that will connect to Sutr. While the app is in Testing mode only these accounts can authorize — you can leave it in Testing indefinitely for personal or team use.
 
 Click **Save and Continue**, then **Back to Dashboard**.
 
@@ -51,10 +51,10 @@ Click **Save and Continue**, then **Back to Dashboard**.
 1. Go to **APIs & Services → Credentials**.
 2. Click **+ Create Credentials → OAuth client ID**.
 3. Set **Application type** to **Web application**.
-4. Give it a name, e.g. `AgentPort`.
+4. Give it a name, e.g. `Sutr`.
 5. Under **Authorized redirect URIs**, add the value that matches your deployment:
 
-   - **Self-hosted on a domain:** `https://agentport.example.com/api/auth/callback`
+   - **Self-hosted on a domain:** `https://sutr.example.com/api/auth/callback`
    - **Local development:** `http://localhost:4747/api/auth/callback`
 
    You can add both if you develop locally and also run a production deployment — they just need to match the `OAUTH_CALLBACK_URL` environment variable exactly.
@@ -84,4 +84,4 @@ Both Gmail and Google Calendar will become available in the integrations UI once
 
 **Testing vs. Published** — Apps in Testing mode only allow the test users you explicitly add. For personal or team use this is fine indefinitely. To allow any Google account to connect, submit the app for verification (required when using sensitive scopes like Gmail and Calendar).
 
-**Callback URL in production** — If you deploy AgentPort to a non-localhost URL, add that callback URL to the **Authorized redirect URIs** list in your OAuth client and set `OAUTH_CALLBACK_URL` accordingly. You can have multiple redirect URIs registered on the same client.
+**Callback URL in production** — If you deploy Sutr to a non-localhost URL, add that callback URL to the **Authorized redirect URIs** list in your OAuth client and set `OAUTH_CALLBACK_URL` accordingly. You can have multiple redirect URIs registered on the same client.

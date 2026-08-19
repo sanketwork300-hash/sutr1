@@ -2,12 +2,12 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from agent_port.config import settings
-from agent_port.rate_limit import (
+from sutr.config import settings
+from sutr.rate_limit import (
     ACCOUNT_LOCKOUT_THRESHOLD,
     IP_MAX_ATTEMPTS_PER_WINDOW,
 )
-from agent_port.security import hash_password
+from sutr.security import hash_password
 
 
 @pytest.mark.anyio
@@ -55,7 +55,7 @@ async def test_login_runs_password_verification_for_unknown_email(client, mocker
     so that attackers cannot enumerate registered accounts from response time.
     """
     spy = mocker.spy(
-        __import__("agent_port.api.user_auth", fromlist=["verify_password"]), "verify_password"
+        __import__("sutr.api.user_auth", fromlist=["verify_password"]), "verify_password"
     )
 
     resp = await client.post(
@@ -80,7 +80,7 @@ async def test_login_runs_password_verification_for_user_without_password(
     session.commit()
 
     spy = mocker.spy(
-        __import__("agent_port.api.user_auth", fromlist=["verify_password"]), "verify_password"
+        __import__("sutr.api.user_auth", fromlist=["verify_password"]), "verify_password"
     )
 
     resp = await client.post(
@@ -118,7 +118,7 @@ def test_dummy_hash_is_verifiable():
     """Sanity: the module-level dummy hash is a real bcrypt hash that
     verify_password can process without raising.
     """
-    from agent_port.api.user_auth import _DUMMY_HASH
+    from sutr.api.user_auth import _DUMMY_HASH
 
     assert _DUMMY_HASH.startswith("$2")
 
@@ -207,7 +207,7 @@ async def test_per_ip_limit_kicks_in_across_accounts(client, session):
 @pytest.mark.anyio
 async def test_register_returns_verification_state(client, mocker, monkeypatch):
     monkeypatch.setattr(settings, "skip_email_verification", False)
-    mocker.patch("agent_port.email.verification.send_email")
+    mocker.patch("sutr.email.verification.send_email")
 
     resp = await client.post(
         "/api/users/register",

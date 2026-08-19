@@ -173,7 +173,7 @@ On success, the browser is redirected to the integration detail page in the UI a
 
 ### `GET /api/auth/google/login`
 
-Begin a "Sign in with Google" flow for a user logging in to agent-port itself. No auth required.
+Begin a "Sign in with Google" flow for a user logging in to sutr itself. No auth required.
 Completely independent from the Google integration's OAuth — set `GOOGLE_LOGIN_CLIENT_ID` and
 `GOOGLE_LOGIN_CLIENT_SECRET` to enable.
 
@@ -611,7 +611,7 @@ Get a single approval request by ID.
 ### `POST /api/tool-approvals/requests/{request_id}/await`
 
 Agent-facing long-poll endpoint for approval decisions. This is the REST equivalent of the MCP
-`agentport__await_approval` flow, except it returns the current approval status and lets the caller
+`sutr__await_approval` flow, except it returns the current approval status and lets the caller
 retry the original tool call once the status becomes `approved`.
 
 **Body (optional):**
@@ -684,7 +684,7 @@ Generate a new shared secret and 10 recovery codes. Returns:
 ```json
 {
   "secret": "BASE32SECRET",
-  "otpauth_uri": "otpauth://totp/AgentPort:you@example.com?secret=...&issuer=AgentPort",
+  "otpauth_uri": "otpauth://totp/Sutr:you@example.com?secret=...&issuer=Sutr",
   "qr_data_url": "data:image/png;base64,...",
   "recovery_codes": ["xxxxx-xxxxx", "..."]
 }
@@ -759,7 +759,7 @@ The `outcome` field can be: `executed`, `approval_required`, `denied`, or `error
 
 ## OAuth 2.0 Authorization Server
 
-MCP clients can authenticate to `/mcp` using the OAuth 2.0 Authorization Code + PKCE flow. The following endpoints are provided by the MCP SDK and AgentPort's OAuth provider.
+MCP clients can authenticate to `/mcp` using the OAuth 2.0 Authorization Code + PKCE flow. The following endpoints are provided by the MCP SDK and Sutr's OAuth provider.
 
 ### Discovery
 

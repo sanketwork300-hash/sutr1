@@ -47,9 +47,9 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
       >
         <img
           src={
-            theme === 'dark' ? '/logos/agentport-dark-mode.png' : '/logos/agentport-light-mode.png'
+            theme === 'dark' ? '/logos/sutr-dark-mode.png' : '/logos/sutr-light-mode.png'
           }
-          alt="AgentPort"
+          alt="Sutr"
           style={{ height: 22, width: 'auto' }}
         />
         <span
@@ -62,7 +62,7 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
             marginLeft: 8,
           }}
         >
-          AgentPort
+          Sutr
         </span>
         {mobile && (
           <button

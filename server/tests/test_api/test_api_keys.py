@@ -4,8 +4,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlmodel import select
 
-from agent_port.main import app
-from agent_port.models.api_key import ApiKey
+from sutr.main import app
+from sutr.models.api_key import ApiKey
 
 
 @pytest.mark.asyncio
@@ -90,8 +90,8 @@ async def test_api_key_updates_last_used_at(agent_key_client, api_key_record, se
 
 @pytest.mark.asyncio
 async def test_invalid_api_key_returns_401(session, test_user, test_org):
-    from agent_port.db import get_session
-    from agent_port.dependencies import get_current_org, get_current_user
+    from sutr.db import get_session
+    from sutr.dependencies import get_current_org, get_current_user
 
     def override_session():
         yield session
@@ -121,7 +121,7 @@ async def test_invalid_api_key_returns_401(session, test_user, test_org):
 @pytest.mark.asyncio
 async def test_api_key_cannot_reach_approvals(session, api_key_record):
     """Approval endpoints use get_current_user (JWT-only). API key must be rejected."""
-    from agent_port.db import get_session
+    from sutr.db import get_session
 
     _, plain_key = api_key_record
 
@@ -144,8 +144,8 @@ async def test_api_key_cannot_reach_approvals(session, api_key_record):
 @pytest.mark.asyncio
 async def test_api_key_cannot_change_tool_settings(session, test_org, api_key_record):
     """Tool-settings endpoints use get_current_user (JWT-only). API key must be rejected."""
-    from agent_port.db import get_session
-    from agent_port.models.integration import InstalledIntegration
+    from sutr.db import get_session
+    from sutr.models.integration import InstalledIntegration
 
     _, plain_key = api_key_record
 
@@ -179,8 +179,8 @@ async def test_api_key_cannot_change_tool_settings(session, test_org, api_key_re
 
 @pytest.mark.asyncio
 async def test_revoked_key_returns_401(session, test_user, test_org, api_key_record):
-    from agent_port.db import get_session
-    from agent_port.dependencies import get_current_org, get_current_user
+    from sutr.db import get_session
+    from sutr.dependencies import get_current_org, get_current_user
 
     api_key, plain_key = api_key_record
     api_key.is_active = False

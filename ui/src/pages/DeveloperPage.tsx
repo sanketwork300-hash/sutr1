@@ -205,23 +205,23 @@ export default function DeveloperPage() {
 
   type Step = { instruction: string; code: string; lang: Lang }
   const skillsStep: Step = {
-    instruction: 'Then install the AgentPort skills:',
-    code: 'npx skills add yakkomajuri/agentport-skills',
+    instruction: 'Then install the Sutr skills:',
+    code: 'npx skills add sutr-dev/sutr-skills',
     lang: 'bash',
   }
   const autoApproveBlurb = (client: string) =>
-    `Lastly, configure auto-approval for AgentPort tool calls. Since AgentPort gates approvals itself, you don't need ${client} to ask you permission to run commands.`
+    `Lastly, configure auto-approval for Sutr tool calls. Since Sutr gates approvals itself, you don't need ${client} to ask you permission to run commands.`
   const tabContent: Record<TabId, Step[]> = {
     'claude-code': [
       {
         instruction: 'Run in your terminal:',
-        code: `claude mcp add agentport -s user --transport http ${mcpUrl}`,
+        code: `claude mcp add sutr -s user --transport http ${mcpUrl}`,
         lang: 'bash',
       },
       skillsStep,
       {
         instruction: `${autoApproveBlurb('Claude Code')}\n\nAdd to \`~/.claude/settings.json\`:`,
-        code: JSON.stringify({ permissions: { allow: ['mcp__agentport__*'] } }, null, 2),
+        code: JSON.stringify({ permissions: { allow: ['mcp__sutr__*'] } }, null, 2),
         lang: 'json',
       },
       {
@@ -234,7 +234,7 @@ export default function DeveloperPage() {
     cursor: [
       {
         instruction: 'Add to `~/.cursor/mcp.json`:',
-        code: JSON.stringify({ mcpServers: { agentport: { url: mcpUrl } } }, null, 2),
+        code: JSON.stringify({ mcpServers: { sutr: { url: mcpUrl } } }, null, 2),
         lang: 'json',
       },
       skillsStep,
@@ -247,13 +247,13 @@ export default function DeveloperPage() {
     codex: [
       {
         instruction: 'Run in your terminal:',
-        code: `codex mcp add agentport --url ${mcpUrl}`,
+        code: `codex mcp add sutr --url ${mcpUrl}`,
         lang: 'bash',
       },
       skillsStep,
       {
         instruction: `${autoApproveBlurb('Codex')}\n\nAdd to \`~/.codex/config.toml\`:`,
-        code: `[mcp_servers.agentport]\ndefault_tools_approval_mode = "approve"`,
+        code: `[mcp_servers.sutr]\ndefault_tools_approval_mode = "approve"`,
         lang: 'toml',
       },
     ],
@@ -266,7 +266,7 @@ export default function DeveloperPage() {
       },
       {
         instruction: 'Paste this prompt to OpenClaw:',
-        code: `Let's install AgentPort for managing third-party integrations.\n\n1. Install the AgentPort CLI from npm with \`npm install -g agentport-cli\`\n2. Authenticate it by running \`ap auth login --api-key <your-api-key>\`\n3. Add the AgentPort skills from https://github.com/yakkomajuri/agentport-skills`,
+        code: `Let's install Sutr for managing third-party integrations.\n\n1. Install the Sutr CLI from npm with \`npm install -g sutr-cli\`\n2. Authenticate it by running \`ap auth login --api-key <your-api-key>\`\n3. Add the Sutr skills from https://github.com/sutr-dev/sutr-skills`,
         lang: 'text',
       },
     ],
@@ -279,7 +279,7 @@ export default function DeveloperPage() {
       },
       {
         instruction: 'Paste this prompt to Hermes:',
-        code: `Let's install AgentPort for managing third-party integrations.\n\n1. Install the AgentPort CLI from npm with \`npm install -g agentport-cli\`\n2. Authenticate it by running \`ap auth login --api-key <your-api-key>\`\n3. Add the AgentPort skills from https://github.com/yakkomajuri/agentport-skills`,
+        code: `Let's install Sutr for managing third-party integrations.\n\n1. Install the Sutr CLI from npm with \`npm install -g sutr-cli\`\n2. Authenticate it by running \`ap auth login --api-key <your-api-key>\`\n3. Add the Sutr skills from https://github.com/sutr-dev/sutr-skills`,
         lang: 'text',
       },
     ],

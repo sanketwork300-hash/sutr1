@@ -5,7 +5,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PYTHONUNBUFFERED=1 \
-    DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:5432/agentport
+    DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:5432/sutr
 
 WORKDIR /app/server
 
@@ -24,4 +24,4 @@ EXPOSE 4747
 # Run migrations then start with --reload for hot reloading.
 # Mount server/src into /app/server/src at runtime for changes to take effect:
 #   docker run -v $(pwd)/server/src:/app/server/src ...
-CMD ["sh", "-c", "uv run alembic upgrade head && exec uv run uvicorn agent_port.main:app --host 0.0.0.0 --port 4747 --reload"]
+CMD ["sh", "-c", "uv run alembic upgrade head && exec uv run uvicorn sutr.main:app --host 0.0.0.0 --port 4747 --reload"]

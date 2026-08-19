@@ -4,8 +4,8 @@ from datetime import datetime, timedelta
 import pyotp
 import pytest
 
-from agent_port.models.tool_approval_request import ToolApprovalRequest
-from agent_port.totp import generate_recovery_codes, hash_recovery_codes
+from sutr.models.tool_approval_request import ToolApprovalRequest
+from sutr.totp import generate_recovery_codes, hash_recovery_codes
 
 
 def _make_pending(session, test_org) -> ToolApprovalRequest:

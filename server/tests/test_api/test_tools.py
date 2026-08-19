@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlmodel import select
 
-from agent_port.models.integration import InstalledIntegration
-from agent_port.models.tool_execution import ToolExecutionSetting
+from sutr.models.integration import InstalledIntegration
+from sutr.models.tool_execution import ToolExecutionSetting
 
 
 @pytest.mark.anyio
@@ -27,7 +27,7 @@ async def test_list_tools_for_integration(client):
     mock_tools = [
         {"name": "create_annotation", "description": "Create annotation", "inputSchema": {}}
     ]
-    with patch("agent_port.mcp.client.list_tools", new_callable=AsyncMock, return_value=mock_tools):
+    with patch("sutr.mcp.client.list_tools", new_callable=AsyncMock, return_value=mock_tools):
         resp = await client.get("/api/tools/posthog")
         assert resp.status_code == 200
         data = resp.json()
@@ -47,7 +47,7 @@ async def test_list_all_tools(client):
     )
 
     mock_tools = [{"name": "tool1", "description": "Tool 1", "inputSchema": {}}]
-    with patch("agent_port.mcp.client.list_tools", new_callable=AsyncMock, return_value=mock_tools):
+    with patch("sutr.mcp.client.list_tools", new_callable=AsyncMock, return_value=mock_tools):
         resp = await client.get("/api/tools")
         assert resp.status_code == 200
         data = resp.json()
@@ -80,7 +80,7 @@ async def test_list_tools_applies_execution_modes_in_bulk(client, session, test_
         {"name": "tool_allow", "description": "Allowed tool", "inputSchema": {}},
         {"name": "tool_default", "description": "Default tool", "inputSchema": {}},
     ]
-    with patch("agent_port.mcp.client.list_tools", new_callable=AsyncMock, return_value=mock_tools):
+    with patch("sutr.mcp.client.list_tools", new_callable=AsyncMock, return_value=mock_tools):
         resp = await client.get("/api/tools/posthog")
 
     assert resp.status_code == 200
@@ -118,12 +118,12 @@ async def test_list_tools_waits_for_in_progress_refresh(client, session, test_or
         return waited_tools
 
     monkeypatch.setattr(
-        "agent_port.api.tools._wait_for_in_progress_refresh",
+        "sutr.api.tools._wait_for_in_progress_refresh",
         fake_wait_for_in_progress_refresh,
     )
 
     with patch(
-        "agent_port.mcp.client.list_tools",
+        "sutr.mcp.client.list_tools",
         new_callable=AsyncMock,
         side_effect=AssertionError("should not hit upstream while refresh is in progress"),
     ):
@@ -156,7 +156,7 @@ async def test_call_tool(client, session, test_org):
     session.commit()
 
     mock_result = {"content": [{"type": "text", "text": "done"}], "isError": False}
-    with patch("agent_port.mcp.client.call_tool", new_callable=AsyncMock, return_value=mock_result):
+    with patch("sutr.mcp.client.call_tool", new_callable=AsyncMock, return_value=mock_result):
         resp = await client.post(
             "/api/tools/posthog/call",
             json={"tool_name": "create_annotation", "args": {"content": "test"}},
@@ -199,7 +199,7 @@ async def test_call_tool_with_additional_info_on_executed_path(client, session, 
     session.commit()
 
     mock_result = {"content": [{"type": "text", "text": "done"}], "isError": False}
-    with patch("agent_port.mcp.client.call_tool", new_callable=AsyncMock, return_value=mock_result):
+    with patch("sutr.mcp.client.call_tool", new_callable=AsyncMock, return_value=mock_result):
         resp = await client.post(
             "/api/tools/posthog/call",
             json={
@@ -237,7 +237,7 @@ async def test_call_tool_without_additional_info_still_works(client, session, te
     session.commit()
 
     mock_result = {"content": [{"type": "text", "text": "done"}], "isError": False}
-    with patch("agent_port.mcp.client.call_tool", new_callable=AsyncMock, return_value=mock_result):
+    with patch("sutr.mcp.client.call_tool", new_callable=AsyncMock, return_value=mock_result):
         resp = await client.post(
             "/api/tools/posthog/call",
             json={"tool_name": "create_annotation", "args": {"content": "test"}},
@@ -272,7 +272,7 @@ async def test_call_tool_logs_entry(client, session, test_org):
     session.commit()
 
     mock_result = {"content": [{"type": "text", "text": "ok"}], "isError": False}
-    with patch("agent_port.mcp.client.call_tool", new_callable=AsyncMock, return_value=mock_result):
+    with patch("sutr.mcp.client.call_tool", new_callable=AsyncMock, return_value=mock_result):
         await client.post(
             "/api/tools/posthog/call",
             json={"tool_name": "my_tool", "args": {"x": 1}},

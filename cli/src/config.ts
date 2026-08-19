@@ -15,10 +15,13 @@ export interface Config {
   oauth_client_id: string;
 }
 
-const CONFIG_DIR = join(homedir(), ".config", "agent-port");
+const CONFIG_DIR = join(homedir(), ".config", "sutr");
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
+// Pre-rebrand (AgentPort) config location, read once as a fallback so an
+// existing login survives the upgrade; the next write lands in CONFIG_PATH.
+const LEGACY_CONFIG_PATH = join(homedir(), ".config", "agent-port", "config.json");
 
-const DEFAULT_URL = process.env.AGENT_PORT_URL || "https://app.agentport.sh";
+const DEFAULT_URL = process.env.SUTR_URL || process.env.AGENT_PORT_URL || "https://app.sutr.sh";
 
 const DEFAULTS: Config = {
   url: DEFAULT_URL,
@@ -35,7 +38,12 @@ export function readConfig(): Config {
     const raw = readFileSync(CONFIG_PATH, "utf-8");
     return { ...DEFAULTS, ...JSON.parse(raw) };
   } catch {
-    return { ...DEFAULTS };
+    try {
+      const raw = readFileSync(LEGACY_CONFIG_PATH, "utf-8");
+      return { ...DEFAULTS, ...JSON.parse(raw) };
+    } catch {
+      return { ...DEFAULTS };
+    }
   }
 }
 

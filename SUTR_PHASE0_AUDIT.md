@@ -1,11 +1,11 @@
-# Sutr — Phase 0 Repository Audit (AgentPort baseline)
+# Sutr — Phase 0 Repository Audit (Sutr baseline)
 
-Date: 2026-08-19. Read-only audit of the supplied AgentPort repository; no code was modified.
+Date: 2026-08-19. Read-only audit of the supplied Sutr repository; no code was modified.
 Baseline verification: **328/328 server tests pass** (`uv run pytest`, ~2 min), CLI `tsc --noEmit` passes, UI `tsc -b` passes (one TS `baseUrl` deprecation warning with TS 6). CI is green-shaped (ruff + pytest + prettier).
 
 ---
 
-## 1. What AgentPort actually is
+## 1. What Sutr actually is
 
 A universal tool gateway for AI agents:
 
@@ -14,7 +14,7 @@ MCP client (Claude Desktop/Code, Cursor, …)
         │ Streamable HTTP (stateful, session-id + SSE notifications)
 ┌───────▼────────────────────────────────────┐
 │ FastAPI server :4747                       │
-│  /mcp  → MCP gateway (11 agentport__ meta- │
+│  /mcp  → MCP gateway (11 sutr__ meta- │
 │          tools; upstream tools addressed    │
 │          by (integration_id, tool_name))    │
 │  /api  → REST management API               │
@@ -30,7 +30,7 @@ MCP client (Claude Desktop/Code, Cursor, …)
 - **Tenancy**: `User ⇄ OrgMembership ⇄ Org`, but effectively 1 user = 1 org. `role` ("owner"|"member") is read in exactly one place (`api/billing.py:47`); "member" is never assigned; there are no invites, no member management, no workspaces.
 - **Governance**: deny-by-default per-tool policy (`allow | require_approval | deny`) in `ToolExecutionSetting`; human approvals with SHA-256 argument binding (`approvals/normalize.py`) for approve-once; `allow_tool_forever` drops argument binding by design; optional TOTP gate on decisions; long-poll wakeups via in-process asyncio pub/sub.
 - **Secrets**: `SecretsBackend` abstraction with `db` (plaintext — the default) and `db_kms` (AWS KMS envelope AES-256-GCM). Secrets never serialized to the frontend.
-- **MCP**: AgentPort is both an MCP **server** (gateway) and a full **OAuth 2.1 authorization server** for MCP clients, and an MCP **client** toward upstream remote servers.
+- **MCP**: Sutr is both an MCP **server** (gateway) and a full **OAuth 2.1 authorization server** for MCP clients, and an MCP **client** toward upstream remote servers.
 
 ## 2. Subsystem inventory (what exists and works)
 
@@ -56,7 +56,7 @@ MCP client (Claude Desktop/Code, Cursor, …)
 | Tests | `server/tests` | 328 pass; in-memory SQLite via `create_all` (migrations untested); SSRF module stubbed out in tests |
 | Docs | `docs/` | teeny site; API reference (815 lines) + approvals doc exist but missing from sidebar |
 | Deploy | Dockerfile (UI+server single image), compose (+Caddy prod), fly.io, install.sh | Working; fly deploy not gated on CI |
-| **OpenAPI** | `server/src/agent_port/openapi/__init__.py` | **0 bytes — completely absent** despite AGENTS.md claiming a generator |
+| **OpenAPI** | `server/src/sutr/openapi/__init__.py` | **0 bytes — completely absent** despite AGENTS.md claiming a generator |
 
 ## 3. Gap map vs. Sutr requirements
 

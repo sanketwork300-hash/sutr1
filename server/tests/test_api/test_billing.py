@@ -3,8 +3,8 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from agent_port.config import settings
-from agent_port.main import app
+from sutr.config import settings
+from sutr.main import app
 
 
 @pytest.fixture
@@ -31,15 +31,15 @@ def stripe_stubs(monkeypatch):
         url = "https://billing.stripe.com/test"
 
     monkeypatch.setattr(
-        "agent_port.api.billing.stripe.Customer.create",
+        "sutr.api.billing.stripe.Customer.create",
         lambda **kw: _Customer(),
     )
     monkeypatch.setattr(
-        "agent_port.api.billing.stripe.checkout.Session.create",
+        "sutr.api.billing.stripe.checkout.Session.create",
         lambda **kw: _Checkout(),
     )
     monkeypatch.setattr(
-        "agent_port.api.billing.stripe.billing_portal.Session.create",
+        "sutr.api.billing.stripe.billing_portal.Session.create",
         lambda **kw: _Portal(),
     )
 
@@ -70,7 +70,7 @@ async def test_subscription_requires_auth():
 async def test_subscription_creates_free_row_on_first_access(
     client, session, test_org, billing_on, stripe_stubs
 ):
-    from agent_port.models.subscription import Subscription
+    from sutr.models.subscription import Subscription
 
     assert session.get(Subscription, test_org.id) is None
 
@@ -103,7 +103,7 @@ async def test_portal_returns_redirect_url(client, billing_on, stripe_stubs):
 
 @pytest.mark.asyncio
 async def test_non_owner_cannot_checkout(client, session, test_user, test_org, billing_on):
-    from agent_port.models.org_membership import OrgMembership
+    from sutr.models.org_membership import OrgMembership
 
     membership = session.get(OrgMembership, (test_user.id, test_org.id))
     assert membership is not None
@@ -118,7 +118,7 @@ async def test_non_owner_cannot_checkout(client, session, test_user, test_org, b
 
 @pytest.mark.asyncio
 async def test_non_owner_cannot_open_portal(client, session, test_user, test_org, billing_on):
-    from agent_port.models.org_membership import OrgMembership
+    from sutr.models.org_membership import OrgMembership
 
     membership = session.get(OrgMembership, (test_user.id, test_org.id))
     assert membership is not None

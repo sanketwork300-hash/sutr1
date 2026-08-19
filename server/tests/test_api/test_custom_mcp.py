@@ -7,10 +7,10 @@ services.
 
 import pytest
 
-from agent_port.mcp.client import _ensure_safe_upstream
-from agent_port.models.integration import InstalledIntegration
-from agent_port.models.org_membership import OrgMembership
-from agent_port.upstream_safety import UnsafeUpstreamUrlError
+from sutr.mcp.client import _ensure_safe_upstream
+from sutr.models.integration import InstalledIntegration
+from sutr.models.org_membership import OrgMembership
+from sutr.upstream_safety import UnsafeUpstreamUrlError
 
 
 @pytest.fixture(autouse=True)
@@ -35,7 +35,7 @@ def _public_dns(monkeypatch):
         except ValueError:
             return ("93.184.216.34",)
 
-    from agent_port import upstream_safety
+    from sutr import upstream_safety
 
     real = upstream_safety._resolve_host
 

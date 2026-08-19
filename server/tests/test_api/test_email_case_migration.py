@@ -31,7 +31,7 @@ def _alembic_config(db_url: str) -> Config:
 @pytest.fixture(name="migrated_engine")
 def migrated_engine_fixture(tmp_path, monkeypatch):
     """Engine whose schema is upgraded to just BEFORE the 0016 migration."""
-    from agent_port.config import settings as app_settings
+    from sutr.config import settings as app_settings
 
     db_path = tmp_path / "mig.db"
     db_url = f"sqlite:///{db_path}"

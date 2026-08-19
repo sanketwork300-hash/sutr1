@@ -18,20 +18,20 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlmodel import select
 
-from agent_port.db import get_session
-from agent_port.dependencies import (
+from sutr.db import get_session
+from sutr.dependencies import (
     AgentAuth,
     get_agent_auth,
     get_current_org,
     get_current_user,
     get_impersonator,
 )
-from agent_port.main import app
-from agent_port.models.log import LogEntry
-from agent_port.models.oauth_revoked_token import OAuthRevokedToken
-from agent_port.models.org import Org
-from agent_port.models.org_membership import OrgMembership
-from agent_port.models.user import User
+from sutr.main import app
+from sutr.models.log import LogEntry
+from sutr.models.oauth_revoked_token import OAuthRevokedToken
+from sutr.models.org import Org
+from sutr.models.org_membership import OrgMembership
+from sutr.models.user import User
 
 
 def _make_target(session, email: str = "target@example.com") -> User:
@@ -152,7 +152,7 @@ async def test_stop_impersonation_revokes_token(admin_client, session):
 @pytest.mark.anyio
 async def test_stop_impersonation_rejects_non_impersonation_token(session, test_user):
     """Refuse to revoke a plain access token via /impersonate/stop."""
-    from agent_port.auth_tokens import create_access_token
+    from sutr.auth_tokens import create_access_token
 
     plain = create_access_token(str(test_user.id))
 
@@ -190,7 +190,7 @@ async def test_impersonated_tool_call_tags_log_entry(session, test_org):
 
     # Mint impersonation token directly (avoid the end-to-end start endpoint
     # since we already test that above).
-    from agent_port.auth_tokens import create_impersonation_token
+    from sutr.auth_tokens import create_impersonation_token
 
     imp_token, _jti = create_impersonation_token(str(admin.id), str(target.id))
 
@@ -215,7 +215,7 @@ async def test_impersonated_tool_call_tags_log_entry(session, test_org):
     # Write a LogEntry directly using the same path the tool-call handler
     # would: confirm that AgentAuth.impersonator propagates through
     # get_agent_auth for bearer tokens.
-    from agent_port.dependencies import _decode_rest_bearer_token, _resolve_impersonator
+    from sutr.dependencies import _decode_rest_bearer_token, _resolve_impersonator
 
     payload = _decode_rest_bearer_token(
         imp_token,
@@ -257,7 +257,7 @@ async def test_totp_setup_blocked_during_impersonation(session, test_org):
     session.add(OrgMembership(user_id=target.id, org_id=test_org.id, role="member"))
     session.commit()
 
-    from agent_port.auth_tokens import create_impersonation_token
+    from sutr.auth_tokens import create_impersonation_token
 
     imp_token, _jti = create_impersonation_token(str(admin.id), str(target.id))
 

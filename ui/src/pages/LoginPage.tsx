@@ -94,10 +94,10 @@ export default function LoginPage() {
           <img
             src={
               theme === 'dark'
-                ? '/logos/agentport-dark-mode.png'
-                : '/logos/agentport-light-mode.png'
+                ? '/logos/sutr-dark-mode.png'
+                : '/logos/sutr-light-mode.png'
             }
-            alt="AgentPort"
+            alt="Sutr"
             style={{ height: 22, width: 'auto' }}
           />
           <span
@@ -109,7 +109,7 @@ export default function LoginPage() {
               letterSpacing: 0.3,
             }}
           >
-            AgentPort
+            Sutr
           </span>
         </div>
         <h1

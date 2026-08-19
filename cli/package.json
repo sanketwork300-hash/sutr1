@@ -1,19 +1,19 @@
 {
-  "name": "agentport-cli",
+  "name": "sutr-cli",
   "version": "1.1.1",
-  "description": "CLI for AgentPort — universal tool gateway for AI agents",
+  "description": "CLI for Sutr — universal tool gateway for AI agents",
   "license": "MIT",
-  "homepage": "https://github.com/yakkomajuri/agent-port",
+  "homepage": "https://github.com/sutr-dev/sutr",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yakkomajuri/agent-port"
+    "url": "https://github.com/sutr-dev/sutr"
   },
   "files": [
     "dist"
   ],
   "type": "module",
   "bin": {
-    "agentport": "./dist/index.js",
+    "sutr": "./dist/index.js",
     "ap": "./dist/index.js"
   },
   "scripts": {

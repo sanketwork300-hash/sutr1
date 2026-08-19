@@ -6,9 +6,9 @@ from datetime import datetime, timedelta
 import httpx
 from sqlmodel import Session
 
-from agent_port.mcp.oauth import is_auth_error, is_token_expired, refresh_tokens
-from agent_port.models.oauth import OAuthState
-from agent_port.secrets.records import get_secret_value, upsert_secret
+from sutr.mcp.oauth import is_auth_error, is_token_expired, refresh_tokens
+from sutr.models.oauth import OAuthState
+from sutr.secrets.records import get_secret_value, upsert_secret
 
 
 def _state(**overrides) -> OAuthState:
@@ -96,14 +96,14 @@ async def test_refresh_tokens_happy_path(session, test_org, monkeypatch):
         async def post(self, *args, **kwargs):
             return _FakeResponse()
 
-    monkeypatch.setattr("agent_port.mcp.oauth.httpx.AsyncClient", _FakeClient)
+    monkeypatch.setattr("sutr.mcp.oauth.httpx.AsyncClient", _FakeClient)
 
     refreshed = await refresh_tokens(state)
     assert refreshed is not None
     assert refreshed.status == "connected"
     assert refreshed.expires_in == 1800
 
-    from agent_port import db as db_module
+    from sutr import db as db_module
 
     with Session(db_module.engine) as check:
         assert get_secret_value(check, refreshed.access_token_secret_id) == "new-access"
@@ -133,7 +133,7 @@ async def test_refresh_tokens_failure_returns_none(session, test_org, monkeypatc
         async def post(self, *args, **kwargs):
             return _FakeResponse()
 
-    monkeypatch.setattr("agent_port.mcp.oauth.httpx.AsyncClient", _FakeClient)
+    monkeypatch.setattr("sutr.mcp.oauth.httpx.AsyncClient", _FakeClient)
     assert await refresh_tokens(state) is None
 
 

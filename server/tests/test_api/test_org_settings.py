@@ -1,6 +1,6 @@
 import pytest
 
-from agent_port.config import settings
+from sutr.config import settings
 
 
 @pytest.mark.asyncio

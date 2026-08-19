@@ -13,12 +13,12 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from agent_port.api.google_login import _find_or_create_user
-from agent_port.config import settings
-from agent_port.db import get_session
-from agent_port.main import app
-from agent_port.models.user import User
-from agent_port.security import hash_password
+from sutr.api.google_login import _find_or_create_user
+from sutr.config import settings
+from sutr.db import get_session
+from sutr.main import app
+from sutr.models.user import User
+from sutr.security import hash_password
 
 
 def _select_users(session):
@@ -41,8 +41,8 @@ async def unauth_client_fixture(monkeypatch, mocker):
     monkeypatch.setattr(settings, "is_self_hosted", False)
 
     # Silence outbound email during registration/password-reset flows.
-    mocker.patch("agent_port.email.verification.send_email")
-    mocker.patch("agent_port.api.password_reset.send_email")
+    mocker.patch("sutr.email.verification.send_email")
+    mocker.patch("sutr.api.password_reset.send_email")
 
     engine = create_engine(
         "sqlite:///:memory:",
@@ -158,7 +158,7 @@ async def test_resend_verification_by_email_finds_account_regardless_of_case(una
     session.add(user)
     session.commit()
 
-    send = mocker.patch("agent_port.email.verification.send_email")
+    send = mocker.patch("sutr.email.verification.send_email")
     resp = await client.post(
         "/api/auth/resend-verification-by-email",
         json={"email": "VERIFY@Example.COM"},
@@ -277,7 +277,7 @@ async def test_google_callback_links_existing_user_via_case_variant(unauth_clien
     client, session = unauth_client
     monkeypatch.setattr(settings, "google_login_client_id", "gid.apps.googleusercontent.com")
     monkeypatch.setattr(settings, "google_login_client_secret", "gsecret")
-    monkeypatch.setattr("agent_port.api.google_login.httpx.AsyncClient", _FakeGoogleMixedCaseClient)
+    monkeypatch.setattr("sutr.api.google_login.httpx.AsyncClient", _FakeGoogleMixedCaseClient)
 
     existing = User(email="mixed@example.com", hashed_password="h", email_verified=False)
     session.add(existing)

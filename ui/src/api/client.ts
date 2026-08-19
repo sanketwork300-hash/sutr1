@@ -1,4 +1,14 @@
-const TOKEN_KEY = 'agent_port_token'
+const TOKEN_KEY = 'sutr_token'
+// Pre-rebrand (AgentPort) storage key — migrated on first load so existing
+// sessions survive the upgrade.
+const LEGACY_TOKEN_KEY = 'agent_port_token'
+{
+  const legacy = localStorage.getItem(LEGACY_TOKEN_KEY)
+  if (legacy && !localStorage.getItem(TOKEN_KEY)) {
+    localStorage.setItem(TOKEN_KEY, legacy)
+  }
+  localStorage.removeItem(LEGACY_TOKEN_KEY)
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null

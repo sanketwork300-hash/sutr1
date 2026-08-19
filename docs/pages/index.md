@@ -1,11 +1,11 @@
 ---
-title: Introduction to AgentPort
+title: Introduction to Sutr
 nav_title: Overview
 ---
 
-# Introduction to AgentPort
+# Introduction to Sutr
 
-AgentPort is an open source gateway to securely connect any service to autonomous agents.
+Sutr is an open source gateway to securely connect any service to autonomous agents.
 
 "Securely" means that agents never see your API keys, and that you control exactly what they can and can't do with approval policies.
 
@@ -22,35 +22,35 @@ Currently, the approval policies supported are:
 ### Try locally
 
 ```sh
-git clone https://github.com/yakkomajuri/agentport
+git clone https://github.com/sutr-dev/sutr
 
-cd agentport
+cd sutr
 docker compose up
 ```
 
 ### Self-host
 
-You can deploy a production instance of AgentPort in five minutes with our one-liner install:
+You can deploy a production instance of Sutr in five minutes with our one-liner install:
 
 ```sh
-curl -fsSL https://install.agentport.sh | sh
+curl -fsSL https://install.sutr.sh | sh
 ```
 
 More info on the [dedicated docs page](/self-host/install).
 
 ### Cloud
 
-If you'd rather use a managed service, head to [app.agentport.sh](https://app.agentport.sh).
+If you'd rather use a managed service, head to [app.sutr.sh](https://app.sutr.sh).
 
 ## Human approval
 
-When you set a tool on AgentPort to have a policy of "Ask for approval", any time your agent tries to call that tool via the CLI or the MCP it will get a response back explaining that this tool is gated and that it requires human approval, as well as link to send to you for approval.
+When you set a tool on Sutr to have a policy of "Ask for approval", any time your agent tries to call that tool via the CLI or the MCP it will get a response back explaining that this tool is gated and that it requires human approval, as well as link to send to you for approval.
 
 When you open that link you'll see something like this:
 
 ![Approval screen](/img/approval-screen.png)
 
-The approval screen will only show to you as a logged in user, and the tokens the agent has access to for tool calling obviously prevent it from approving its own requests. If your agent runs on a machine where you have AgentPort logged in, or you want to be extra cautious, you can also enable 2FA with an authenticator app for approving tool calls.
+The approval screen will only show to you as a logged in user, and the tokens the agent has access to for tool calling obviously prevent it from approving its own requests. If your agent runs on a machine where you have Sutr logged in, or you want to be extra cautious, you can also enable 2FA with an authenticator app for approving tool calls.
 
 The approval screen will show you the exact tool the agent is trying to call, as well as the exact parameters for you to approve or deny. If you approve the request, the agent will be able to run the tool call with those parameters only.
 
@@ -62,7 +62,7 @@ On the approval screen, you can also select the "Always approve" option. This me
 
 ## Logs
 
-Another key part of AgentPort is that **everything&#x20;**&#x69;s logge&#x64;**.**
+Another key part of Sutr is that **everything&#x20;**&#x69;s logge&#x64;**.**
 
 We log when a request to use a tool happened, when it was approved, the IP the request came from and the IP that approved it and so on.
 

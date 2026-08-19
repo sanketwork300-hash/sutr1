@@ -4,10 +4,10 @@ import pytest
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
-from agent_port.approvals.policy import evaluate_policy
-from agent_port.models.org import Org  # noqa: F401
-from agent_port.models.tool_execution import ToolExecutionSetting
-from agent_port.models.user import User  # noqa: F401
+from sutr.approvals.policy import evaluate_policy
+from sutr.models.org import Org  # noqa: F401
+from sutr.models.tool_execution import ToolExecutionSetting
+from sutr.models.user import User  # noqa: F401
 
 
 @pytest.fixture(name="db")

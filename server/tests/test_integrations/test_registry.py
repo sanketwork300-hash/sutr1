@@ -1,6 +1,6 @@
-from agent_port.api_client import params_to_input_schema
-from agent_port.integrations import registry
-from agent_port.integrations.types import ApiTool, CustomIntegration, RemoteMcpIntegration
+from sutr.api_client import params_to_input_schema
+from sutr.integrations import registry
+from sutr.integrations.types import ApiTool, CustomIntegration, RemoteMcpIntegration
 
 
 def test_list_all_returns_integrations():

@@ -2,8 +2,8 @@
 
 import pytest
 
-from agent_port.openapi.errors import OpenAPIError
-from agent_port.openapi.resolver import resolve_refs
+from sutr.openapi.errors import OpenAPIError
+from sutr.openapi.resolver import resolve_refs
 
 
 def test_simple_ref_inlined():

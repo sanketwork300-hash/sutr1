@@ -684,7 +684,7 @@ export default function ApprovePage({
         )}
       </div>
 
-      {!embedded && <p style={footerStyle}>AgentPort</p>}
+      {!embedded && <p style={footerStyle}>Sutr</p>}
 
       {/* ── Params overlay (modal on desktop, sheet on mobile) ── */}
       {!embedded && paramsOpen && (

@@ -5,14 +5,14 @@ import pytest
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
-from agent_port.approvals.normalize import hash_normalized_args, normalize_tool_args
-from agent_port.approvals.requests import (
+from sutr.approvals.normalize import hash_normalized_args, normalize_tool_args
+from sutr.approvals.requests import (
     get_or_create_approval_request,
     try_consume_approved_request,
 )
-from agent_port.models.org import Org
-from agent_port.models.tool_approval_request import ToolApprovalRequest
-from agent_port.models.user import User  # noqa: F401
+from sutr.models.org import Org
+from sutr.models.tool_approval_request import ToolApprovalRequest
+from sutr.models.user import User  # noqa: F401
 
 
 @pytest.fixture(name="db")
@@ -57,7 +57,7 @@ def test_uses_org_approval_expiry_override(db, org_id):
 
 
 def test_falls_back_to_settings_when_no_org_override(db, org_id):
-    from agent_port.config import settings
+    from sutr.config import settings
 
     before = datetime.utcnow()
     req = get_or_create_approval_request(db, org_id, "github", "create_issue", {"title": "hi"})

@@ -4,8 +4,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agent_port.models.secret import Secret
-from agent_port.secrets.kms import DBKMSSecretsBackend
+from sutr.models.secret import Secret
+from sutr.secrets.kms import DBKMSSecretsBackend
 
 
 @pytest.fixture()

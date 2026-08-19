@@ -1,6 +1,6 @@
-# AgentPort Docs
+# Sutr Docs
 
-The AgentPort documentation site, powered by [teeny](https://github.com/yakkomajuri/teeny).
+The Sutr documentation site, powered by [teeny](https://github.com/yakkomajuri/teeny).
 
 ## Layout
 

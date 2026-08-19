@@ -4,9 +4,9 @@ from types import SimpleNamespace
 import pytest
 from sqlmodel import select
 
-from agent_port.models.custom_api_integration import CustomApiIntegration
-from agent_port.models.integration import InstalledIntegration
-from agent_port.models.tool_cache import ToolCache
+from sutr.models.custom_api_integration import CustomApiIntegration
+from sutr.models.integration import InstalledIntegration
+from sutr.models.tool_cache import ToolCache
 
 
 def _safe_url_stub(*args, **kwargs):
@@ -25,7 +25,7 @@ def _tool(name: str = "get_item") -> dict:
 
 @pytest.mark.anyio
 async def test_create_list_get_custom_api(client, monkeypatch):
-    monkeypatch.setattr("agent_port.api.custom_api.validate_safe_url", _safe_url_stub)
+    monkeypatch.setattr("sutr.api.custom_api.validate_safe_url", _safe_url_stub)
 
     resp = await client.post(
         "/api/integrations/custom-api",
@@ -56,7 +56,7 @@ async def test_create_list_get_custom_api(client, monkeypatch):
 
 @pytest.mark.anyio
 async def test_custom_api_validation_rejects_bad_tools(client, monkeypatch):
-    monkeypatch.setattr("agent_port.api.custom_api.validate_safe_url", _safe_url_stub)
+    monkeypatch.setattr("sutr.api.custom_api.validate_safe_url", _safe_url_stub)
 
     resp = await client.post(
         "/api/integrations/custom-api",
@@ -81,7 +81,7 @@ async def test_custom_api_validation_rejects_bad_tools(client, monkeypatch):
 
 @pytest.mark.anyio
 async def test_custom_api_surfaces_in_catalog(client, monkeypatch):
-    monkeypatch.setattr("agent_port.api.custom_api.validate_safe_url", _safe_url_stub)
+    monkeypatch.setattr("sutr.api.custom_api.validate_safe_url", _safe_url_stub)
 
     create_resp = await client.post(
         "/api/integrations/custom-api",
@@ -107,12 +107,12 @@ async def test_custom_api_surfaces_in_catalog(client, monkeypatch):
 async def test_custom_api_update_updates_installed_url_and_invalidates_cache(
     client, session, test_org, monkeypatch
 ):
-    monkeypatch.setattr("agent_port.api.custom_api.validate_safe_url", _safe_url_stub)
+    monkeypatch.setattr("sutr.api.custom_api.validate_safe_url", _safe_url_stub)
 
     async def _refresh_one(*args, **kwargs):
         return None
 
-    monkeypatch.setattr("agent_port.api.custom_api.refresh_one", _refresh_one)
+    monkeypatch.setattr("sutr.api.custom_api.refresh_one", _refresh_one)
 
     create_resp = await client.post(
         "/api/integrations/custom-api",
@@ -157,7 +157,7 @@ async def test_custom_api_update_updates_installed_url_and_invalidates_cache(
 
 @pytest.mark.anyio
 async def test_custom_api_delete_requires_uninstall(client, session, test_org, monkeypatch):
-    monkeypatch.setattr("agent_port.api.custom_api.validate_safe_url", _safe_url_stub)
+    monkeypatch.setattr("sutr.api.custom_api.validate_safe_url", _safe_url_stub)
     create_resp = await client.post(
         "/api/integrations/custom-api",
         json={"name": "Delete API", "base_url": "https://api.example.com", "tools": []},
@@ -185,7 +185,7 @@ async def test_custom_api_delete_requires_uninstall(client, session, test_org, m
 async def test_custom_api_test_uses_browser_token_and_redacts_response(
     client, monkeypatch, session
 ):
-    monkeypatch.setattr("agent_port.api.custom_api.validate_safe_url", _safe_url_stub)
+    monkeypatch.setattr("sutr.api.custom_api.validate_safe_url", _safe_url_stub)
 
     async def _dispatch(**kwargs):
         assert kwargs["headers"] == {"Authorization": "Bearer sk_test_secret"}
@@ -196,7 +196,7 @@ async def test_custom_api_test_uses_browser_token_and_redacts_response(
             "duration_ms": 12,
         }
 
-    monkeypatch.setattr("agent_port.api.custom_api.api_client.dispatch_api_tool", _dispatch)
+    monkeypatch.setattr("sutr.api.custom_api.api_client.dispatch_api_tool", _dispatch)
 
     resp = await client.post(
         "/api/integrations/custom-api/test",
@@ -237,7 +237,7 @@ async def test_custom_api_test_does_not_leak_stored_token_to_other_targets(
     targets the same connection that owns it. Otherwise a caller could swap
     base_url to a domain they control and have us send the secret there.
     """
-    monkeypatch.setattr("agent_port.api.custom_api.validate_safe_url", _safe_url_stub)
+    monkeypatch.setattr("sutr.api.custom_api.validate_safe_url", _safe_url_stub)
 
     create_resp = await client.post(
         "/api/integrations/custom-api",
@@ -253,7 +253,7 @@ async def test_custom_api_test_does_not_leak_stored_token_to_other_targets(
     row_id = create_resp.json()["id"]
     integration_id = create_resp.json()["integration_id"]
 
-    from agent_port.secrets.records import upsert_secret
+    from sutr.secrets.records import upsert_secret
 
     secret = upsert_secret(
         session,
@@ -286,7 +286,7 @@ async def test_custom_api_test_does_not_leak_stored_token_to_other_targets(
             "duration_ms": 1,
         }
 
-    monkeypatch.setattr("agent_port.api.custom_api.api_client.dispatch_api_tool", _dispatch)
+    monkeypatch.setattr("sutr.api.custom_api.api_client.dispatch_api_tool", _dispatch)
 
     # Caller omits token AND swaps base_url to an attacker-controlled host.
     resp = await client.post(
@@ -312,7 +312,7 @@ async def test_custom_api_test_does_not_leak_stored_token_to_other_targets(
 async def test_custom_api_test_uses_stored_token_for_same_target(
     client, session, test_org, monkeypatch
 ):
-    monkeypatch.setattr("agent_port.api.custom_api.validate_safe_url", _safe_url_stub)
+    monkeypatch.setattr("sutr.api.custom_api.validate_safe_url", _safe_url_stub)
 
     create_resp = await client.post(
         "/api/integrations/custom-api",
@@ -327,7 +327,7 @@ async def test_custom_api_test_uses_stored_token_for_same_target(
     row_id = create_resp.json()["id"]
     integration_id = create_resp.json()["integration_id"]
 
-    from agent_port.secrets.records import upsert_secret
+    from sutr.secrets.records import upsert_secret
 
     secret = upsert_secret(
         session,
@@ -356,7 +356,7 @@ async def test_custom_api_test_uses_stored_token_for_same_target(
         captured_headers.update(kwargs["headers"])
         return {"content": [], "isError": False, "status_code": 200, "duration_ms": 1}
 
-    monkeypatch.setattr("agent_port.api.custom_api.api_client.dispatch_api_tool", _dispatch)
+    monkeypatch.setattr("sutr.api.custom_api.api_client.dispatch_api_tool", _dispatch)
 
     resp = await client.post(
         "/api/integrations/custom-api/test",
@@ -381,12 +381,12 @@ async def test_custom_api_patch_can_switch_to_no_auth(client, monkeypatch):
     the merged pair must be validated once, not field-by-field against the
     other field's old value.
     """
-    monkeypatch.setattr("agent_port.api.custom_api.validate_safe_url", _safe_url_stub)
+    monkeypatch.setattr("sutr.api.custom_api.validate_safe_url", _safe_url_stub)
 
     async def _refresh_one(*args, **kwargs):
         return None
 
-    monkeypatch.setattr("agent_port.api.custom_api.refresh_one", _refresh_one)
+    monkeypatch.setattr("sutr.api.custom_api.refresh_one", _refresh_one)
 
     create_resp = await client.post(
         "/api/integrations/custom-api",
@@ -418,8 +418,8 @@ async def test_dispatch_api_tool_revalidates_url_at_dispatch_time():
     whose A records have changed to point at internal IPs is caught before we
     connect.
     """
-    from agent_port import api_client
-    from agent_port.integrations.types import ApiTool, Param
+    from sutr import api_client
+    from sutr.integrations.types import ApiTool, Param
 
     tool = ApiTool(
         name="ping",

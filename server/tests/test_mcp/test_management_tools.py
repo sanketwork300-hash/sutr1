@@ -8,14 +8,14 @@ import pytest
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from agent_port.billing.limits import FREE_INTEGRATION_LIMIT
-from agent_port.config import settings
-from agent_port.mcp import management_tools
-from agent_port.models.integration import InstalledIntegration
-from agent_port.models.org import Org
-from agent_port.models.tool_cache import ToolCache
-from agent_port.models.tool_execution import ToolExecutionSetting
-from agent_port.models.user import User  # noqa: F401
+from sutr.billing.limits import FREE_INTEGRATION_LIMIT
+from sutr.config import settings
+from sutr.mcp import management_tools
+from sutr.models.integration import InstalledIntegration
+from sutr.models.org import Org
+from sutr.models.tool_cache import ToolCache
+from sutr.models.tool_execution import ToolExecutionSetting
+from sutr.models.user import User  # noqa: F401
 
 
 @pytest.fixture(name="policy_env")
@@ -59,7 +59,7 @@ def policy_env_fixture(monkeypatch):
         )
         session.commit()
 
-    monkeypatch.setattr("agent_port.mcp.management_tools.engine", engine)
+    monkeypatch.setattr("sutr.mcp.management_tools.engine", engine)
     return engine, org_id
 
 
@@ -80,8 +80,8 @@ def install_env_fixture(monkeypatch):
     async def noop_refresh(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr("agent_port.mcp.management_tools.engine", engine)
-    monkeypatch.setattr("agent_port.mcp.management_tools.refresh_one", noop_refresh)
+    monkeypatch.setattr("sutr.mcp.management_tools.engine", engine)
+    monkeypatch.setattr("sutr.mcp.management_tools.refresh_one", noop_refresh)
     return engine, org_id
 
 

@@ -1,6 +1,6 @@
 import pytest
 
-from agent_port.api_client import (
+from sutr.api_client import (
     _build_body,
     _build_query,
     _build_url,
@@ -10,7 +10,7 @@ from agent_port.api_client import (
     list_tools,
     params_to_input_schema,
 )
-from agent_port.integrations.types import (
+from sutr.integrations.types import (
     ApiTool,
     CustomIntegration,
     CustomTool,
@@ -18,8 +18,8 @@ from agent_port.integrations.types import (
     Param,
     TokenAuth,
 )
-from agent_port.models.integration import InstalledIntegration
-from agent_port.secrets.records import upsert_secret
+from sutr.models.integration import InstalledIntegration
+from sutr.secrets.records import upsert_secret
 
 
 @pytest.fixture
@@ -279,7 +279,7 @@ async def test_call_tool_uses_configured_token_header(session, test_org, monkeyp
         captured.update(kwargs)
         return {"content": [{"type": "text", "text": "ok"}], "isError": False}
 
-    monkeypatch.setattr("agent_port.api_client.dispatch_api_tool", _dispatch)
+    monkeypatch.setattr("sutr.api_client.dispatch_api_tool", _dispatch)
 
     result = await call_tool(installed, tool, {}, integration=integration)
 

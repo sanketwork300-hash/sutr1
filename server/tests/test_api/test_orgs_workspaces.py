@@ -5,11 +5,11 @@ import uuid
 import pytest
 from sqlmodel import select
 
-from agent_port.authz import PERMISSIONS, ROLES, role_can
-from agent_port.models.org_invitation import OrgInvitation
-from agent_port.models.org_membership import OrgMembership
-from agent_port.models.user import User
-from agent_port.models.workspace import Workspace
+from sutr.authz import PERMISSIONS, ROLES, role_can
+from sutr.models.org_invitation import OrgInvitation
+from sutr.models.org_membership import OrgMembership
+from sutr.models.user import User
+from sutr.models.workspace import Workspace
 
 
 def _set_role(session, test_user, test_org, role: str) -> None:

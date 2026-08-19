@@ -3,7 +3,7 @@ title: Tool Approvals
 ---
 # Tool Approvals
 
-Agent Port is safe by default: every tool call requires explicit approval before execution.
+Sutr is safe by default: every tool call requires explicit approval before execution.
 
 ## How it works
 
@@ -14,13 +14,13 @@ Agent Port is safe by default: every tool call requires explicit approval before
    - `allow` — calls execute immediately without approval
 
 3. **Approval flow** — When a blocked call happens:
-   - Agent Port creates a pending approval request
+   - Sutr creates a pending approval request
    - Returns a `403` (REST) or an approval-required text response (MCP) with an `approval_url` and the `approval_request_id`
    - The agent presents the link to the user
    - The user reviews and decides in the UI
-   - The agent either retries the call, long-polls `/api/tool-approvals/requests/{id}/await`, uses `ap tools await-approval`, or uses `ap tools call --wait` / `agentport__await_approval(request_id)` depending on the transport
+   - The agent either retries the call, long-polls `/api/tool-approvals/requests/{id}/await`, uses `ap tools await-approval`, or uses `ap tools call --wait` / `sutr__await_approval(request_id)` depending on the transport
 
-4. **MCP long-poll flow** — Over the MCP surface, the agent should call `agentport__await_approval(request_id)` immediately after sharing the approval URL with the human, instead of waiting for a chat reply. The meta-tool blocks until the human approves, denies, or the server's long-poll budget (`approval_long_poll_timeout_seconds`, default 240 s) elapses. On approve it returns the real upstream tool result — no retry needed. On timeout it returns a "still pending" message so the agent can loop back in without human intervention.
+4. **MCP long-poll flow** — Over the MCP surface, the agent should call `sutr__await_approval(request_id)` immediately after sharing the approval URL with the human, instead of waiting for a chat reply. The meta-tool blocks until the human approves, denies, or the server's long-poll budget (`approval_long_poll_timeout_seconds`, default 240 s) elapses. On approve it returns the real upstream tool result — no retry needed. On timeout it returns a "still pending" message so the agent can loop back in without human intervention.
 
 5. **CLI / REST await flow** — Over the CLI and REST surfaces, the same long-poll budget is available at `POST /api/tool-approvals/requests/{id}/await`. `ap tools await-approval` wraps that endpoint directly, and `ap tools call --wait` uses it under the hood before retrying the original tool call automatically.
 
@@ -33,7 +33,7 @@ Agent Port is safe by default: every tool call requires explicit approval before
 
 ## Tool-level allow policies
 
-When a user chooses "allow tool forever", Agent Port updates that tool's execution mode to `allow`. Future calls with the **same integration and tool** are allowed automatically, regardless of arguments.
+When a user chooses "allow tool forever", Sutr updates that tool's execution mode to `allow`. Future calls with the **same integration and tool** are allowed automatically, regardless of arguments.
 
 ## Request lifecycle
 

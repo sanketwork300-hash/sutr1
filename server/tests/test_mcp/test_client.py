@@ -3,9 +3,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent_port.mcp.client import _auth_headers, call_tool, list_tools
-from agent_port.models.integration import InstalledIntegration
-from agent_port.models.oauth import OAuthState
+from sutr.mcp.client import _auth_headers, call_tool, list_tools
+from sutr.models.integration import InstalledIntegration
+from sutr.models.oauth import OAuthState
 
 
 def _make_installed(auth_method="token", token_secret_id=None):
@@ -22,7 +22,7 @@ def _make_installed(auth_method="token", token_secret_id=None):
 def test_auth_headers_token():
     secret_id = uuid.uuid4()
     installed = _make_installed(auth_method="token", token_secret_id=secret_id)
-    with patch("agent_port.mcp.client.get_secret_value", return_value="my_token"):
+    with patch("sutr.mcp.client.get_secret_value", return_value="my_token"):
         headers = _auth_headers(installed)
     assert headers == {"Authorization": "Bearer my_token"}
 
@@ -35,7 +35,7 @@ def test_auth_headers_oauth():
         integration_id="test",
         access_token_secret_id=secret_id,
     )
-    with patch("agent_port.mcp.client.get_secret_value", return_value="oauth_token"):
+    with patch("sutr.mcp.client.get_secret_value", return_value="oauth_token"):
         headers = _auth_headers(installed, oauth_state)
     assert headers == {"Authorization": "Bearer oauth_token"}
 
@@ -61,9 +61,9 @@ async def test_list_tools_calls_mcp():
     mock_session.list_tools = AsyncMock(return_value=mock_result)
 
     with (
-        patch("agent_port.mcp.client.streamablehttp_client") as mock_client,
-        patch("agent_port.mcp.client.ClientSession") as mock_session_cls,
-        patch("agent_port.mcp.client.get_secret_value", return_value="tok"),
+        patch("sutr.mcp.client.streamablehttp_client") as mock_client,
+        patch("sutr.mcp.client.ClientSession") as mock_session_cls,
+        patch("sutr.mcp.client.get_secret_value", return_value="tok"),
     ):
         mock_client.return_value.__aenter__ = AsyncMock(
             return_value=(MagicMock(), MagicMock(), MagicMock())
@@ -94,9 +94,9 @@ async def test_call_tool_calls_mcp():
     mock_session.call_tool = AsyncMock(return_value=mock_result)
 
     with (
-        patch("agent_port.mcp.client.streamablehttp_client") as mock_client,
-        patch("agent_port.mcp.client.ClientSession") as mock_session_cls,
-        patch("agent_port.mcp.client.get_secret_value", return_value="tok"),
+        patch("sutr.mcp.client.streamablehttp_client") as mock_client,
+        patch("sutr.mcp.client.ClientSession") as mock_session_cls,
+        patch("sutr.mcp.client.get_secret_value", return_value="tok"),
     ):
         mock_client.return_value.__aenter__ = AsyncMock(
             return_value=(MagicMock(), MagicMock(), MagicMock())

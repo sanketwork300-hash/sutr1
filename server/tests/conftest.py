@@ -7,31 +7,31 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
-from agent_port.db import get_session
-from agent_port.dependencies import (
+from sutr.db import get_session
+from sutr.dependencies import (
     AgentAuth,
     get_agent_auth,
     get_current_org,
     get_current_user,
     get_impersonator,
 )
-from agent_port.main import app
-from agent_port.models.api_key import ApiKey  # noqa: F401
-from agent_port.models.custom_api_integration import CustomApiIntegration  # noqa: F401
-from agent_port.models.google_login_state import GoogleLoginState  # noqa: F401
-from agent_port.models.integration import InstalledIntegration  # noqa: F401
-from agent_port.models.log import LogEntry  # noqa: F401
-from agent_port.models.oauth import OAuthState  # noqa: F401
-from agent_port.models.oauth_client import OAuthClient  # noqa: F401
-from agent_port.models.oauth_revoked_token import OAuthRevokedToken  # noqa: F401
-from agent_port.models.org import Org
-from agent_port.models.org_membership import OrgMembership
-from agent_port.models.secret import Secret  # noqa: F401
-from agent_port.models.subscription import Subscription  # noqa: F401
-from agent_port.models.tool_approval_request import ToolApprovalRequest  # noqa: F401
-from agent_port.models.tool_cache import ToolCache  # noqa: F401
-from agent_port.models.tool_execution import ToolExecutionSetting  # noqa: F401
-from agent_port.models.user import User
+from sutr.main import app
+from sutr.models.api_key import ApiKey  # noqa: F401
+from sutr.models.custom_api_integration import CustomApiIntegration  # noqa: F401
+from sutr.models.google_login_state import GoogleLoginState  # noqa: F401
+from sutr.models.integration import InstalledIntegration  # noqa: F401
+from sutr.models.log import LogEntry  # noqa: F401
+from sutr.models.oauth import OAuthState  # noqa: F401
+from sutr.models.oauth_client import OAuthClient  # noqa: F401
+from sutr.models.oauth_revoked_token import OAuthRevokedToken  # noqa: F401
+from sutr.models.org import Org
+from sutr.models.org_membership import OrgMembership
+from sutr.models.secret import Secret  # noqa: F401
+from sutr.models.subscription import Subscription  # noqa: F401
+from sutr.models.tool_approval_request import ToolApprovalRequest  # noqa: F401
+from sutr.models.tool_cache import ToolCache  # noqa: F401
+from sutr.models.tool_execution import ToolExecutionSetting  # noqa: F401
+from sutr.models.user import User
 
 
 @pytest.fixture(autouse=True)
@@ -39,12 +39,12 @@ def stub_token_validation(monkeypatch):
     async def _validate_token(url: str, token: str) -> None:
         return None
 
-    monkeypatch.setattr("agent_port.api.installed.validate_token", _validate_token)
+    monkeypatch.setattr("sutr.api.installed.validate_token", _validate_token)
 
 
 @pytest.fixture(autouse=True)
 def _reset_rate_limit_state():
-    from agent_port.rate_limit import reset_all_rate_limiters
+    from sutr.rate_limit import reset_all_rate_limiters
 
     reset_all_rate_limiters()
     yield
@@ -52,17 +52,17 @@ def _reset_rate_limit_state():
 
 
 _ENGINE_CONSUMER_MODULES = (
-    "agent_port.db",
-    "agent_port.api.tool_approvals",
-    "agent_port.api_client",
-    "agent_port.integrations.registry",
-    "agent_port.mcp.asgi",
-    "agent_port.mcp.client",
-    "agent_port.mcp.management_tools",
-    "agent_port.mcp.oauth",
-    "agent_port.mcp.oauth_provider",
-    "agent_port.mcp.refresh",
-    "agent_port.mcp.server",
+    "sutr.db",
+    "sutr.api.tool_approvals",
+    "sutr.api_client",
+    "sutr.integrations.registry",
+    "sutr.mcp.asgi",
+    "sutr.mcp.client",
+    "sutr.mcp.management_tools",
+    "sutr.mcp.oauth",
+    "sutr.mcp.oauth_provider",
+    "sutr.mcp.refresh",
+    "sutr.mcp.server",
 )
 
 

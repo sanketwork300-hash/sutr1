@@ -2,8 +2,8 @@ import httpx
 import pytest
 from sqlmodel import select
 
-from agent_port.models.oauth import OAuthState
-from agent_port.models.secret import Secret
+from sutr.models.oauth import OAuthState
+from sutr.models.secret import Secret
 
 
 class FakeOAuthAsyncClient:
@@ -57,7 +57,7 @@ class FakeOAuthAsyncClient:
                     "grant_types": ["authorization_code", "refresh_token"],
                     "response_types": ["code"],
                     "token_endpoint_auth_method": "none",
-                    "client_name": "AgentPort",
+                    "client_name": "Sutr",
                 },
                 request=request,
             )
@@ -77,9 +77,9 @@ class FakeOAuthAsyncClient:
 
 @pytest.fixture
 def fake_oauth_http(monkeypatch):
-    monkeypatch.setattr("agent_port.api.auth.httpx.AsyncClient", FakeOAuthAsyncClient)
-    monkeypatch.setattr("agent_port.auth_start.httpx.AsyncClient", FakeOAuthAsyncClient)
-    monkeypatch.setattr("agent_port.api.auth.refresh_one", lambda *args, **kwargs: None)
+    monkeypatch.setattr("sutr.api.auth.httpx.AsyncClient", FakeOAuthAsyncClient)
+    monkeypatch.setattr("sutr.auth_start.httpx.AsyncClient", FakeOAuthAsyncClient)
+    monkeypatch.setattr("sutr.api.auth.refresh_one", lambda *args, **kwargs: None)
 
 
 @pytest.mark.anyio

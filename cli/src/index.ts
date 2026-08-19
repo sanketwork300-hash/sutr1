@@ -9,8 +9,8 @@ declare const __VERSION__: string;
 const program = new Command();
 
 program
-  .name("ap")
-  .description("AgentPort CLI — manage integrations and call tools")
+  .name("sutr")
+  .description("Sutr CLI — manage integrations and call tools")
   .version(__VERSION__);
 
 program.addCommand(authCommand);

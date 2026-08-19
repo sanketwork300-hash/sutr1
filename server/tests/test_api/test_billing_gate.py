@@ -3,8 +3,8 @@
 import pytest
 from fastapi import HTTPException
 
-from agent_port.billing.gate import require_plus
-from agent_port.models.subscription import Subscription
+from sutr.billing.gate import require_plus
+from sutr.models.subscription import Subscription
 
 
 def test_require_plus_raises_when_no_subscription_row(session, test_org):

@@ -1,6 +1,6 @@
 # Sutr Build Progress
 
-Working log of the AgentPort → Sutr build. See `SUTR_PHASE0_AUDIT.md` for the baseline audit.
+Working log of the Sutr → Sutr build. See `SUTR_PHASE0_AUDIT.md` for the baseline audit.
 Verification gate for every phase: `cd server && uv run ruff format && uv run ruff check . && uv run pytest -q` plus `cd ui && pnpm exec tsc -b && pnpm exec vite build` and `cd cli && pnpm exec tsc --noEmit`.
 
 ## Phase 0 — Repository audit ✅ (2026-08-19)
@@ -41,6 +41,22 @@ UI:
 - OAuth refresh helpers unit-tested for the first time (`tests/test_mcp/test_oauth_refresh.py`): expiry buffer, ExceptionGroup/cycle-safe auth-error detection, happy/failure/missing-material refresh paths.
 - Known limitation (documented, unchanged): providers declaring two token headers (datadog DD_API_KEY + DD_APPLICATION_KEY) can only store one token (`InstalledIntegration.token_secret_id` is singular); remote-MCP token auth sends `Authorization: Bearer` regardless, so this is latent. `EnvVarAuth` remains dead code.
 - Suite: 573 green.
+
+## Phase 3.5 — OpenAPI compiler core (partial, discovered 2026-08-19)
+Found in-tree but not logged: `sutr/openapi/` (loader, normalizer, resolver, security, compiler, limits, errors), `api/openapi_projects.py`, `models/openapi_project.py`, migration `0024`, 26 tests. Fixed on intake:
+- Resolver cycle detection now tracks every JSON-Pointer location on the traversal path (definition sites included), so direct `A→A` and indirect `A→B→C→A` cycles become bounded placeholders at first re-entry (was: one extra expansion level, and self-refs at the definition site escaped detection). Push/pop set keeps deep documents linear.
+- Compiler test fixtures were invalid OpenAPI (undeclared path params, duplicate operationIds) and correctly rejected by openapi-spec-validator; rewritten as valid specs whose operationIds collide only after snake_case normalization.
+- `Warning_` → `SpecWarning` (ruff N801).
+Remaining for the full OpenAPI phase: REST wiring/UI wizard/testing+deploy of compiled tools (§21–27 tail).
+
+## Phase R — Platform-wide Sutr rebrand ✅ (2026-08-19)
+Codemod across 229 files + renames, per the naming-consistency directive. All checks green after: ruff clean, **599 server tests pass**, `tsc`+`vite build` (UI), `tsc`+`tsup` (CLI), live boot verified (`/health`, `/api/config`, `/mcp` 401 + RFC 9728 `resource_name: "Sutr MCP"`).
+- Python package `agent_port` → `sutr` (imports, pyproject `name = "sutr"`, uv.lock regenerated, alembic, Dockerfiles, start.sh, scripts).
+- MCP meta-tools `agentport__*` → `sutr__*`; MCP server name + TOTP issuer + OAuth AS resource name → "Sutr"; `SutrOAuthProvider`.
+- CLI: bin `sutr` (primary) + `ap` (compat alias), package `sutr-cli`, Commander program name `sutr`, `tools run` added as alias of `tools call`. Config migrates from `~/.config/agent-port/config.json`; `SUTR_URL` env (falls back to `AGENT_PORT_URL`).
+- UI: title/labels/logos/favicons rebranded (placeholder "S" marks generated); localStorage token key migrates `agent_port_token` → `sutr_token` on first load (sessions survive); README hero diagram wordmark patched in-image.
+- Deploy: compose services/images/volumes `sutr*`; default SQLite path `/data/sutr.db` with a guarded one-time `mv` from `/data/agent_port.db` in start.sh; fly.toml/install.sh/docs/Caddyfile renamed. README gains an "Upgrading from AgentPort" section + MIT attribution to upstream.
+- **Decisions documented:** DB tables were never brand-prefixed (`user`, `org`, …) so no table renames were needed (the spec's `agent_port_users → sutr_users` example doesn't apply); REST stays under `/api/*` — it carries no branding, and renaming 100+ stable routes consumed by UI/CLI/docs would break compatibility for zero branding gain (the `/api` namespace *is* the Sutr API namespace). GitHub org/domain placeholders used where the real ones don't exist yet: `github.com/sutr-dev/sutr`, `app.sutr.sh`, `docs.sutr.sh` — update when the real remote/domains are provisioned. LICENSE intentionally untouched (upstream MIT attribution).
 
 ## Phase 4 — MCP (next)
 Registry/gateway verification is largely covered by existing tests + Phase 3; remaining: reduce REST/MCP duplication (moves into Phase 5 pipeline unification), per-call connection reuse (perf, optional).

@@ -1,6 +1,6 @@
 import pytest
 
-from agent_port.security import hash_password, verify_password
+from sutr.security import hash_password, verify_password
 
 
 @pytest.mark.anyio

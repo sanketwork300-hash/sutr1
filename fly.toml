@@ -1,15 +1,15 @@
-# fly.toml app configuration file generated for agent-port on 2026-04-15T14:01:58-03:00
+# fly.toml app configuration file generated for sutr on 2026-04-15T14:01:58-03:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'agent-port'
+app = 'sutr'
 primary_region = 'iad'
 
 [build]
   [build.args]
     IS_CLOUD = "true"
-    VITE_PUBLIC_POSTHOG_HOST = "https://d.agentport.sh"
+    VITE_PUBLIC_POSTHOG_HOST = "https://d.sutr.sh"
 
 [deploy]
   release_command = 'uv run alembic upgrade head'
@@ -17,11 +17,11 @@ primary_region = 'iad'
 
 [env]
   PORT = '4747'
-  BASE_URL = 'https://app.agentport.sh'
-  OAUTH_CALLBACK_URL = 'https://app.agentport.sh/api/auth/callback'
-  UI_BASE_URL = 'https://app.agentport.sh'
+  BASE_URL = 'https://app.sutr.sh'
+  OAUTH_CALLBACK_URL = 'https://app.sutr.sh/api/auth/callback'
+  UI_BASE_URL = 'https://app.sutr.sh'
   IS_CLOUD = 'true'
-  POSTHOG_HOST = 'https://d.agentport.sh'
+  POSTHOG_HOST = 'https://d.sutr.sh'
   # Fly's edge proxy is the sole ingress and sets X-Forwarded-For.
   TRUST_PROXY_HEADERS = 'true'
 

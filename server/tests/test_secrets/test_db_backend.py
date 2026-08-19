@@ -1,5 +1,5 @@
-from agent_port.models.secret import Secret
-from agent_port.secrets.db import DBSecretsBackend
+from sutr.models.secret import Secret
+from sutr.secrets.db import DBSecretsBackend
 
 
 def test_store_returns_secret_payload():

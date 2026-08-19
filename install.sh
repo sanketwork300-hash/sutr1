@@ -1,30 +1,30 @@
 #!/usr/bin/env sh
-# AgentPort production install.
+# Sutr production install.
 #
 # One-liner usage (fresh host):
-#   curl -fsSL https://raw.githubusercontent.com/yakkomajuri/agent-port/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/sutr-dev/sutr/main/install.sh | sh
 #
 # Or clone first and run ./install.sh. Either way:
 #   1. Ensures Docker + Compose are present.
-#   2. Clones the repo (if not already in it) into ./agentport.
+#   2. Clones the repo (if not already in it) into ./sutr.
 #   3. Prompts for domain + Let's Encrypt email.
 #   4. Shows this host's public IP and waits until the domain resolves to it.
-#   5. Brings up the Caddy + AgentPort stack.
+#   5. Brings up the Caddy + Sutr stack.
 #
 # Environment overrides:
-#   AGENTPORT_REPO     git URL to clone from (default: upstream)
-#   AGENTPORT_BRANCH   branch to check out   (default: main)
-#   AGENTPORT_DIR      target directory      (default: ./agentport)
+#   SUTR_REPO     git URL to clone from (default: upstream)
+#   SUTR_BRANCH   branch to check out   (default: main)
+#   SUTR_DIR      target directory      (default: ./sutr)
 #   SKIP_DNS_CHECK=1   skip the DNS-propagation wait
 
 set -eu
 
-echo 'This is the installation script for production installs of AgentPort. If you just want to try it out, clone https://github.com/yakkomajuri/agentport and run `docker compose up` instead'
+echo 'This is the installation script for production installs of Sutr. If you just want to try it out, clone https://github.com/sutr-dev/sutr and run `docker compose up` instead'
 echo
 
-REPO_URL="${AGENTPORT_REPO:-https://github.com/yakkomajuri/agent-port.git}"
-BRANCH="${AGENTPORT_BRANCH:-main}"
-TARGET_DIR="${AGENTPORT_DIR:-agentport}"
+REPO_URL="${SUTR_REPO:-https://github.com/sutr-dev/sutr.git}"
+BRANCH="${SUTR_BRANCH:-main}"
+TARGET_DIR="${SUTR_DIR:-sutr}"
 FORCE=0
 
 for arg in "$@"; do
@@ -125,7 +125,7 @@ resolve_a() {
 }
 
 # ── interactive setup ────────────────────────────────────────────────────────
-echo "AgentPort production install"
+echo "Sutr production install"
 echo "─────────────────────────────"
 
 HOST_IP=$(public_ip) || {
@@ -139,7 +139,7 @@ if [ -n "$HOST_IP" ]; then
 	echo
 fi
 
-prompt DOMAIN            "Domain (e.g. agentport.example.com)"
+prompt DOMAIN            "Domain (e.g. sutr.example.com)"
 prompt LETSENCRYPT_EMAIL "Contact email for Let's Encrypt"
 
 DOMAIN=$(get_env DOMAIN)
@@ -189,7 +189,7 @@ docker compose -f docker-compose.prod.yml up -d --build
 
 cat <<EOF
 
-Done. AgentPort will be at https://$DOMAIN once Caddy finishes provisioning
+Done. Sutr will be at https://$DOMAIN once Caddy finishes provisioning
 the TLS certificate (usually under a minute on first boot).
 
 Logs:   docker compose -f docker-compose.prod.yml logs -f

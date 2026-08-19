@@ -5,14 +5,14 @@ nav_title: Claude Desktop
 
 # Claude Desktop
 
-This page walks through connecting the Claude Desktop app (macOS / Windows) to AgentPort over MCP, so Claude can install integrations and call tools through your gateway with your approval policies enforced.
+This page walks through connecting the Claude Desktop app (macOS / Windows) to Sutr over MCP, so Claude can install integrations and call tools through your gateway with your approval policies enforced.
 
-AgentPort exposes a single Streamable HTTP MCP endpoint at `https://app.agentport.sh/mcp` (or your self-hosted URL). Claude Desktop has two ways to talk to it: a built-in **Custom Connectors** UI on paid plans, or the `mcp-remote` stdio bridge on any plan. Both are documented below.
+Sutr exposes a single Streamable HTTP MCP endpoint at `https://app.sutr.sh/mcp` (or your self-hosted URL). Claude Desktop has two ways to talk to it: a built-in **Custom Connectors** UI on paid plans, or the `mcp-remote` stdio bridge on any plan. Both are documented below.
 
 ## Prerequisites
 
 - **Claude Desktop** installed — download from [claude.ai/download](https://claude.ai/download).
-- **An AgentPort API key** — generate one from the **Connect** page in the AgentPort UI ([app.agentport.sh](https://app.agentport.sh) → Connect). Keys begin with `ap_`.
+- **An Sutr API key** — generate one from the **Connect** page in the Sutr UI ([app.sutr.sh](https://app.sutr.sh) → Connect). Keys begin with `ap_`.
 - **Node.js 18+** on your machine — only required if you use Approach B (the `mcp-remote` bridge).
 
 ## Approach A: Custom Connectors (paid plans)
@@ -22,18 +22,18 @@ Anthropic's Custom Connectors UI lets Claude Desktop talk to a remote MCP server
 1. Open Claude Desktop and go to **Settings → Connectors**.
 2. Scroll to the bottom and click **Add custom connector**.
 3. Fill in the form:
-   - **Name:** `AgentPort`
-   - **Remote MCP server URL:** `https://app.agentport.sh/mcp`
-4. Click **Add**, then open the connector you just created and configure authentication. AgentPort accepts OAuth or an `X-API-Key` header. If the UI offers OAuth, use it. Otherwise add a custom header:
+   - **Name:** `Sutr`
+   - **Remote MCP server URL:** `https://app.sutr.sh/mcp`
+4. Click **Add**, then open the connector you just created and configure authentication. Sutr accepts OAuth or an `X-API-Key` header. If the UI offers OAuth, use it. Otherwise add a custom header:
    - **Header name:** `X-API-Key`
    - **Header value:** your `ap_...` key
-5. Save. The connector should turn on, and `agentport__*` tools will be available in any new chat.
+5. Save. The connector should turn on, and `sutr__*` tools will be available in any new chat.
 
-If you're on a self-hosted AgentPort, swap in `https://<your_domain>/mcp`.
+If you're on a self-hosted Sutr, swap in `https://<your_domain>/mcp`.
 
 ## Approach B: `mcp-remote` bridge (any plan)
 
-Claude Desktop's `claude_desktop_config.json` only natively supports **stdio** MCP servers. To connect to AgentPort's HTTP endpoint from any plan (including Free), use the [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) npm package as a stdio-to-HTTP bridge.
+Claude Desktop's `claude_desktop_config.json` only natively supports **stdio** MCP servers. To connect to Sutr's HTTP endpoint from any plan (including Free), use the [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) npm package as a stdio-to-HTTP bridge.
 
 1. Open `claude_desktop_config.json`. The path is:
    - **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
@@ -41,22 +41,22 @@ Claude Desktop's `claude_desktop_config.json` only natively supports **stdio** M
 
    If the file doesn't exist, create it with `{}` as the contents.
 
-2. Add an `agentport` entry under `mcpServers`:
+2. Add an `sutr` entry under `mcpServers`:
 
    ```json
    {
      "mcpServers": {
-       "agentport": {
+       "sutr": {
          "command": "npx",
          "args": [
            "-y",
            "mcp-remote",
-           "https://app.agentport.sh/mcp",
+           "https://app.sutr.sh/mcp",
            "--header",
-           "X-API-Key:${AGENTPORT_API_KEY}"
+           "X-API-Key:${SUTR_API_KEY}"
          ],
          "env": {
-           "AGENTPORT_API_KEY": "ap_your_key_here"
+           "SUTR_API_KEY": "ap_your_key_here"
          }
        }
      }
@@ -73,16 +73,16 @@ Claude Desktop's `claude_desktop_config.json` only natively supports **stdio** M
 
 1. Open a new chat in Claude Desktop.
 2. Click the tool / search-and-tools icon next to the message input.
-3. You should see an `agentport` server with the `agentport__*` meta-tools listed: `list_installed_integrations`, `list_integration_tools`, `describe_tool`, `call_tool`, `await_approval`, and the install helpers.
-4. Ask Claude something like "list my installed AgentPort integrations" and it should call `agentport__list_installed_integrations` and return the result.
+3. You should see an `sutr` server with the `sutr__*` meta-tools listed: `list_installed_integrations`, `list_integration_tools`, `describe_tool`, `call_tool`, `await_approval`, and the install helpers.
+4. Ask Claude something like "list my installed Sutr integrations" and it should call `sutr__list_installed_integrations` and return the result.
 
 ## A note on agent skills
 
-The [`agentport-skills`](/connect/skills) plugin teaches coding agents conventions like always passing `additional_info` and starting `await_approval` in the same turn as a gated call. It only installs into agents with a plugin directory (Claude Code, Cursor, OpenAI Codex) — Claude Desktop has no equivalent install target, so there is no skill step here. Claude Desktop will still use AgentPort correctly; you may occasionally want to remind it to include a one-line reason when calling approval-gated tools.
+The [`sutr-skills`](/connect/skills) plugin teaches coding agents conventions like always passing `additional_info` and starting `await_approval` in the same turn as a gated call. It only installs into agents with a plugin directory (Claude Code, Cursor, OpenAI Codex) — Claude Desktop has no equivalent install target, so there is no skill step here. Claude Desktop will still use Sutr correctly; you may occasionally want to remind it to include a one-line reason when calling approval-gated tools.
 
 ## Troubleshooting
 
-**The `agentport` server doesn't appear in the tool list.**
+**The `sutr` server doesn't appear in the tool list.**
 Quit Claude Desktop completely and relaunch — the config is only re-read at startup. On macOS, "close window" is not the same as "quit". If you used Approach B, also confirm the JSON parses (a missing comma will silently disable the whole `mcpServers` block).
 
 **"Authentication failed" or 401 errors.**

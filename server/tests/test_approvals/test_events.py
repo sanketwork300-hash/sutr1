@@ -1,12 +1,12 @@
 """Unit tests for approvals/events.py — the in-process pub/sub that wakes
-agentport__await_approval when a human commits a decision."""
+sutr__await_approval when a human commits a decision."""
 
 import asyncio
 import uuid
 
 import pytest
 
-from agent_port.approvals import events
+from sutr.approvals import events
 
 
 @pytest.fixture(autouse=True)

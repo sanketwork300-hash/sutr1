@@ -12,8 +12,8 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from agent_port.integrations.registry import _INTEGRATIONS
-from agent_port.integrations.types import (
+from sutr.integrations.registry import _INTEGRATIONS
+from sutr.integrations.types import (
     ApiTool,
     CustomIntegration,
     CustomTool,

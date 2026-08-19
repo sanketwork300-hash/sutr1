@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlmodel import select
 
-from agent_port.approvals import events as approval_events
-from agent_port.config import settings
-from agent_port.models.tool_execution import ToolExecutionSetting
+from sutr.approvals import events as approval_events
+from sutr.config import settings
+from sutr.models.tool_execution import ToolExecutionSetting
 
 
 @pytest.mark.anyio
@@ -57,7 +57,7 @@ async def test_call_tool_allowed_mode(client, session, test_org):
 
     mock_result = {"content": [{"type": "text", "text": "done"}], "isError": False}
     with patch(
-        "agent_port.mcp.client.call_tool",
+        "sutr.mcp.client.call_tool",
         new_callable=AsyncMock,
         return_value=mock_result,
     ):
@@ -98,7 +98,7 @@ async def test_approve_once_flow(client, session, test_org):
     # 3. Retry - should succeed (consumes the approval)
     mock_result = {"content": [{"type": "text", "text": "done"}], "isError": False}
     with patch(
-        "agent_port.mcp.client.call_tool",
+        "sutr.mcp.client.call_tool",
         new_callable=AsyncMock,
         return_value=mock_result,
     ):
@@ -154,7 +154,7 @@ async def test_allow_tool_flow(client, session, test_org):
     # 3. Retry with same args - should succeed
     mock_result = {"content": [{"type": "text", "text": "done"}], "isError": False}
     with patch(
-        "agent_port.mcp.client.call_tool",
+        "sutr.mcp.client.call_tool",
         new_callable=AsyncMock,
         return_value=mock_result,
     ):
@@ -166,7 +166,7 @@ async def test_allow_tool_flow(client, session, test_org):
 
     # 4. Different args - should also succeed (wildcard)
     with patch(
-        "agent_port.mcp.client.call_tool",
+        "sutr.mcp.client.call_tool",
         new_callable=AsyncMock,
         return_value=mock_result,
     ):
@@ -342,7 +342,7 @@ async def test_list_tool_includes_execution_mode(client):
         {"name": "create_annotation", "description": "Create annotation", "inputSchema": {}}
     ]
     with patch(
-        "agent_port.mcp.client.list_tools",
+        "sutr.mcp.client.list_tools",
         new_callable=AsyncMock,
         return_value=mock_tools,
     ):
@@ -376,7 +376,7 @@ async def test_list_all_tools_includes_execution_mode(client, session, test_org)
 
     mock_tools = [{"name": "tool1", "description": "Tool 1", "inputSchema": {}}]
     with patch(
-        "agent_port.mcp.client.list_tools",
+        "sutr.mcp.client.list_tools",
         new_callable=AsyncMock,
         return_value=mock_tools,
     ):
@@ -406,7 +406,7 @@ def _seed_pending_request(session, test_org):
     + /api/tools/.../call setup path to keep these tests focused on the notify wiring."""
     from datetime import datetime, timedelta
 
-    from agent_port.models.tool_approval_request import ToolApprovalRequest
+    from sutr.models.tool_approval_request import ToolApprovalRequest
 
     req = ToolApprovalRequest(
         org_id=test_org.id,

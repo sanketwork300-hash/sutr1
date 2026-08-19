@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from agent_port.security import hash_password, verify_password
+from sutr.security import hash_password, verify_password
 
 
 @pytest.mark.anyio
@@ -13,7 +13,7 @@ async def test_forgot_password_sends_email(client, test_user, session, mocker):
     session.add(test_user)
     session.commit()
 
-    mock_send = mocker.patch("agent_port.api.password_reset.send_email")
+    mock_send = mocker.patch("sutr.api.password_reset.send_email")
     resp = await client.post(
         "/api/auth/forgot-password",
         json={"email": test_user.email},
@@ -28,7 +28,7 @@ async def test_forgot_password_sends_email(client, test_user, session, mocker):
 
 @pytest.mark.anyio
 async def test_forgot_password_unknown_email_still_200(client, mocker):
-    mock_send = mocker.patch("agent_port.api.password_reset.send_email")
+    mock_send = mocker.patch("sutr.api.password_reset.send_email")
     resp = await client.post(
         "/api/auth/forgot-password",
         json={"email": "nonexistent@example.com"},

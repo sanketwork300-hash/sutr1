@@ -10,13 +10,13 @@ import pytest
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from agent_port.approvals import events as approval_events
-from agent_port.mcp.server import _current_auth
-from agent_port.models.integration import InstalledIntegration
-from agent_port.models.org import Org
-from agent_port.models.tool_approval_request import ToolApprovalRequest
-from agent_port.models.tool_execution import ToolExecutionSetting
-from agent_port.models.user import User  # noqa: F401
+from sutr.approvals import events as approval_events
+from sutr.mcp.server import _current_auth
+from sutr.models.integration import InstalledIntegration
+from sutr.models.org import Org
+from sutr.models.tool_approval_request import ToolApprovalRequest
+from sutr.models.tool_execution import ToolExecutionSetting
+from sutr.models.user import User  # noqa: F401
 
 # ── execute_upstream_tool: additional_info is stripped and recorded ──
 
@@ -66,7 +66,7 @@ def mcp_env_fixture(monkeypatch):
     # fixture's session closes does not trigger a refresh.
     detached_org = Org(id=org_id, name="test")
 
-    monkeypatch.setattr("agent_port.mcp.server.engine", engine)
+    monkeypatch.setattr("sutr.mcp.server.engine", engine)
     token = _current_auth.set(_FakeAuth(org=detached_org))
     try:
         yield engine, detached_org
@@ -77,7 +77,7 @@ def mcp_env_fixture(monkeypatch):
 @pytest.mark.anyio
 async def test_execute_upstream_tool_strips_additional_info(mcp_env):
     """additional_info must never leak into the arguments we forward upstream."""
-    from agent_port.mcp.server import execute_upstream_tool
+    from sutr.mcp.server import execute_upstream_tool
 
     engine, org = mcp_env
     captured: dict = {}
@@ -86,7 +86,7 @@ async def test_execute_upstream_tool_strips_additional_info(mcp_env):
         captured["args"] = args
         return {"content": [{"type": "text", "text": "ok"}]}
 
-    with patch("agent_port.mcp.server.mcp_client.call_tool", side_effect=fake_call_tool):
+    with patch("sutr.mcp.server.mcp_client.call_tool", side_effect=fake_call_tool):
         await execute_upstream_tool(
             "posthog",
             "create_annotation",
@@ -98,7 +98,7 @@ async def test_execute_upstream_tool_strips_additional_info(mcp_env):
 
     # And the rationale landed on the log + approval request
     with Session(engine) as session:
-        from agent_port.models.log import LogEntry
+        from sutr.models.log import LogEntry
 
         logs = session.exec(select(LogEntry).where(LogEntry.org_id == org.id)).all()
         assert len(logs) == 1
@@ -114,16 +114,16 @@ async def test_execute_upstream_tool_strips_additional_info(mcp_env):
 @pytest.mark.anyio
 async def test_execute_upstream_tool_without_additional_info(mcp_env):
     """Calls that omit additional_info must still succeed and produce a clean log."""
-    from agent_port.mcp.server import execute_upstream_tool
+    from sutr.mcp.server import execute_upstream_tool
 
     engine, org = mcp_env
 
     fake = AsyncMock(return_value={"content": [{"type": "text", "text": "ok"}]})
-    with patch("agent_port.mcp.server.mcp_client.call_tool", side_effect=fake):
+    with patch("sutr.mcp.server.mcp_client.call_tool", side_effect=fake):
         await execute_upstream_tool("posthog", "create_annotation", {"content": "hello"})
 
     with Session(engine) as session:
-        from agent_port.models.log import LogEntry
+        from sutr.models.log import LogEntry
 
         logs = session.exec(select(LogEntry).where(LogEntry.org_id == org.id)).all()
         assert len(logs) == 1
@@ -133,7 +133,7 @@ async def test_execute_upstream_tool_without_additional_info(mcp_env):
 @pytest.mark.anyio
 async def test_execute_upstream_tool_ignores_non_string_additional_info(mcp_env):
     """A non-string value is dropped (stripped from args, not stored)."""
-    from agent_port.mcp.server import execute_upstream_tool
+    from sutr.mcp.server import execute_upstream_tool
 
     engine, org = mcp_env
     captured: dict = {}
@@ -142,7 +142,7 @@ async def test_execute_upstream_tool_ignores_non_string_additional_info(mcp_env)
         captured["args"] = args
         return {"content": [{"type": "text", "text": "ok"}]}
 
-    with patch("agent_port.mcp.server.mcp_client.call_tool", side_effect=fake_call_tool):
+    with patch("sutr.mcp.server.mcp_client.call_tool", side_effect=fake_call_tool):
         await execute_upstream_tool(
             "posthog",
             "create_annotation",
@@ -151,7 +151,7 @@ async def test_execute_upstream_tool_ignores_non_string_additional_info(mcp_env)
 
     assert "additional_info" not in captured["args"]
     with Session(engine) as session:
-        from agent_port.models.log import LogEntry
+        from sutr.models.log import LogEntry
 
         logs = session.exec(select(LogEntry).where(LogEntry.org_id == org.id)).all()
         assert logs[0].additional_info is None
@@ -187,7 +187,7 @@ def approval_env_fixture(monkeypatch):
 
     detached_org = Org(id=org_id, name="test")
 
-    monkeypatch.setattr("agent_port.mcp.server.engine", engine)
+    monkeypatch.setattr("sutr.mcp.server.engine", engine)
     token = _current_auth.set(_FakeAuth(org=detached_org))
 
     # Isolate events module state so tests don't bleed into one another.
@@ -207,8 +207,8 @@ def approval_env_fixture(monkeypatch):
 @pytest.mark.anyio
 async def test_execute_upstream_tool_returns_request_id_on_approval_required(approval_env):
     """The approval-required response must include the request_id so the agent
-    can hand it to agentport__await_approval without waiting in chat."""
-    from agent_port.mcp.server import execute_upstream_tool
+    can hand it to sutr__await_approval without waiting in chat."""
+    from sutr.mcp.server import execute_upstream_tool
 
     engine, _org = approval_env
 
@@ -220,7 +220,7 @@ async def test_execute_upstream_tool_returns_request_id_on_approval_required(app
         req = session.exec(select(ToolApprovalRequest)).first()
         assert req is not None
         assert str(req.id) in text
-    assert "agentport__await_approval" in text
+    assert "sutr__await_approval" in text
     assert "do not wait" in text.lower() or "without waiting" in text.lower()
 
 
@@ -228,13 +228,13 @@ async def test_execute_upstream_tool_returns_request_id_on_approval_required(app
 async def test_await_approval_wakes_on_approve_and_executes(approval_env):
     """Full flow: execute_upstream_tool returns approval-required, a concurrent
     approval fires notify_decision, and await_approval returns the upstream result."""
-    from agent_port.mcp.server import await_approval, execute_upstream_tool
+    from sutr.mcp.server import await_approval, execute_upstream_tool
 
     engine, _org = approval_env
 
     # Step 1: surface the approval request.
     first = await execute_upstream_tool("posthog", "create_annotation", {"content": "hi"})
-    assert "agentport__await_approval" in first[0].text
+    assert "sutr__await_approval" in first[0].text
 
     with Session(engine) as session:
         req = session.exec(select(ToolApprovalRequest)).first()
@@ -257,7 +257,7 @@ async def test_await_approval_wakes_on_approve_and_executes(approval_env):
     async def fake_upstream(installed, tool_name, args, oauth_state):
         return {"content": [{"type": "text", "text": "executed-ok"}]}
 
-    with patch("agent_port.mcp.server.mcp_client.call_tool", side_effect=fake_upstream):
+    with patch("sutr.mcp.server.mcp_client.call_tool", side_effect=fake_upstream):
         approver_task = asyncio.create_task(approver())
         result = await await_approval(request_id)
         await approver_task
@@ -272,7 +272,7 @@ async def test_await_approval_wakes_on_approve_and_executes(approval_env):
 
 @pytest.mark.anyio
 async def test_await_approval_returns_denied_message(approval_env):
-    from agent_port.mcp.server import await_approval, execute_upstream_tool
+    from sutr.mcp.server import await_approval, execute_upstream_tool
 
     engine, _org = approval_env
 
@@ -302,8 +302,8 @@ async def test_await_approval_returns_denied_message(approval_env):
 async def test_await_approval_times_out_with_still_pending_message(approval_env, monkeypatch):
     """When no decision arrives inside the timeout window, return the
     'still pending — call again' text so the agent can loop back in."""
-    from agent_port.config import settings
-    from agent_port.mcp.server import await_approval, execute_upstream_tool
+    from sutr.config import settings
+    from sutr.mcp.server import await_approval, execute_upstream_tool
 
     # Trim the timeout so the test doesn't have to wait 240s.
     monkeypatch.setattr(settings, "approval_long_poll_timeout_seconds", 0.1)
@@ -316,7 +316,7 @@ async def test_await_approval_times_out_with_still_pending_message(approval_env,
     result = await await_approval(request_id)
     text = result[0].text.lower()
     assert "still pending" in text
-    assert "agentport__await_approval" in result[0].text
+    assert "sutr__await_approval" in result[0].text
     assert str(request_id) in result[0].text
 
 
@@ -325,7 +325,7 @@ async def test_await_approval_short_circuits_when_already_approved(approval_env)
     """If the decision committed before await_approval was ever called
     (e.g. after a server restart), the pre_check in events must resolve
     the wait immediately instead of hanging."""
-    from agent_port.mcp.server import await_approval, execute_upstream_tool
+    from sutr.mcp.server import await_approval, execute_upstream_tool
 
     engine, _org = approval_env
     await execute_upstream_tool("posthog", "create_annotation", {"content": "hi"})
@@ -343,7 +343,7 @@ async def test_await_approval_short_circuits_when_already_approved(approval_env)
     async def fake_upstream(installed, tool_name, args, oauth_state):
         return {"content": [{"type": "text", "text": "recovered-ok"}]}
 
-    with patch("agent_port.mcp.server.mcp_client.call_tool", side_effect=fake_upstream):
+    with patch("sutr.mcp.server.mcp_client.call_tool", side_effect=fake_upstream):
         result = await asyncio.wait_for(await_approval(request_id), timeout=2.0)
 
     assert result[0].text == "recovered-ok"
@@ -351,7 +351,7 @@ async def test_await_approval_short_circuits_when_already_approved(approval_env)
 
 @pytest.mark.anyio
 async def test_await_approval_unknown_request_returns_not_found(approval_env):
-    from agent_port.mcp.server import await_approval
+    from sutr.mcp.server import await_approval
 
     result = await await_approval(uuid.uuid4())
     assert "not found" in result[0].text.lower()
@@ -360,7 +360,7 @@ async def test_await_approval_unknown_request_returns_not_found(approval_env):
 @pytest.mark.anyio
 async def test_await_approval_wrong_org_returns_not_found(approval_env, monkeypatch):
     """Ownership enforcement: a request belonging to another org must 404."""
-    from agent_port.mcp.server import await_approval
+    from sutr.mcp.server import await_approval
 
     engine, _org = approval_env
     other_org_id = uuid.uuid4()

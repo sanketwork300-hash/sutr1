@@ -1,33 +1,33 @@
 ---
-title: AgentPort CLI
+title: Sutr CLI
 nav_title: CLI
 ---
 
-# AgentPort CLI
+# Sutr CLI
 
 ```sh
-npm install -g agentport-cli
+npm install -g sutr-cli
 ```
 
-`ap` is the command-line interface to AgentPort. It is the second of the two ways into the gateway, with the other being our [MCP server](/connect/mcp).
+`ap` is the command-line interface to Sutr. It is the second of the two ways into the gateway, with the other being our [MCP server](/connect/mcp).
 
 Both surface the same integrations, the same tools, and run through the same approval policies. Pick whichever fits your agent best (some can only run one or the other).
 
 
 ## Installation
 
-The CLI ships as the `agentport-cli` npm package and exposes two binaries: `agentport` and the short alias `ap`.
+The CLI ships as the `sutr-cli` npm package and exposes two binaries: `sutr` and the short alias `ap`.
 
 ```sh
-npm install -g agentport-cli
+npm install -g sutr-cli
 ```
 
 
 ## Configuration
 
-Configuration lives at `~/.config/agent-port/config.json` and is managed by the CLI so you shouldn't have to manually edit it. It stores the server URL, the chosen auth mode (currently `api_key`), the API key, and your default output format.
+Configuration lives at `~/.config/sutr/config.json` and is managed by the CLI so you shouldn't have to manually edit it. It stores the server URL, the chosen auth mode (currently `api_key`), the API key, and your default output format.
 
-The default server URL is `https://app.agentport.sh`. Override it with the `AGENT_PORT_URL` environment variable, or persist a different instance with:
+The default server URL is `https://app.sutr.sh`. Override it with the `SUTR_URL` environment variable, or persist a different instance with:
 
 ```sh
 ap auth set-instance-url https://ap.example.com
@@ -37,11 +37,11 @@ Switching instances clears any stored credentials, so you'll need to re-run `ap 
 
 ## Skills
 
-You should really install the [AgentPort Skills](/connect/skills) for your agent to use the AgentPort CLI most efficiently.
+You should really install the [Sutr Skills](/connect/skills) for your agent to use the Sutr CLI most efficiently.
 
 ## Authentication
 
-The CLI authenticates with an API key issued from the AgentPort UI (Settings → API Keys):
+The CLI authenticates with an API key issued from the Sutr UI (Settings → API Keys):
 
 ```sh
 ap auth login --api-key ap_...
@@ -85,7 +85,7 @@ Manage CLI credentials and the target instance.
 | `ap auth login --api-key <key>` | Store an API key issued from the UI as the CLI credential. |
 | `ap auth logout` | Remove stored credentials. |
 | `ap auth status` | Show the configured URL, auth mode, masked tokens, and your account email. |
-| `ap auth set-instance-url <url>` | Point the CLI at a different AgentPort instance. Clears credentials. |
+| `ap auth set-instance-url <url>` | Point the CLI at a different Sutr instance. Clears credentials. |
 
 Example:
 
@@ -133,16 +133,16 @@ Examples:
 ap tools list --integration github -o json
 ap tools describe --integration github --tool create_issue -o json
 ap tools call --integration github --tool create_issue \
-  --args '{"repo":"yakkomajuri/agent-port","title":"docs: typo"}' \
+  --args '{"repo":"sutr-dev/sutr","title":"docs: typo"}' \
   --info "Filing the typo Sam noticed in the README." \
   -o json
 ap tools call --integration github --tool create_issue \
-  --args '{"repo":"yakkomajuri/agent-port","title":"docs: typo"}' \
+  --args '{"repo":"sutr-dev/sutr","title":"docs: typo"}' \
   --info "Filing the typo Sam noticed in the README." \
   --wait --wait-timeout 600 \
   -o json
 ap tools await-approval \
-  --approval-url https://app.agentport.sh/approve/550e8400-e29b-41d4-a716-446655440000 \
+  --approval-url https://app.sutr.sh/approve/550e8400-e29b-41d4-a716-446655440000 \
   -o json
 ```
 
@@ -195,5 +195,5 @@ See [Tool Approvals](/tool-approvals) for how the approval flow works on the ser
 ## Related
 
 - [MCP Aggregation Endpoint](/connect/mcp) — the other way into the gateway.
-- [Skills](/connect/skills) — drop-in skills that teach coding agents how to drive AgentPort.
+- [Skills](/connect/skills) — drop-in skills that teach coding agents how to drive Sutr.
 - [Tool Approvals](/tool-approvals) — how `require_approval` calls are routed to a human.

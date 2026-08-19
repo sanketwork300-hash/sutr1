@@ -7,14 +7,14 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from agent_port.api.google_login import _find_or_create_user
-from agent_port.config import settings
-from agent_port.db import get_session
-from agent_port.main import app
-from agent_port.models.google_login_state import GoogleLoginState
-from agent_port.models.org import Org
-from agent_port.models.org_membership import OrgMembership
-from agent_port.models.user import User
+from sutr.api.google_login import _find_or_create_user
+from sutr.config import settings
+from sutr.db import get_session
+from sutr.main import app
+from sutr.models.google_login_state import GoogleLoginState
+from sutr.models.org import Org
+from sutr.models.org_membership import OrgMembership
+from sutr.models.user import User
 
 
 class _FakeGoogleAsyncClient:
@@ -69,7 +69,7 @@ async def fresh_client_fixture(monkeypatch):
     monkeypatch.setattr(settings, "google_login_client_secret", "gsecret")
     monkeypatch.setattr(settings, "block_signups", False)
     monkeypatch.setattr(settings, "is_self_hosted", False)
-    monkeypatch.setattr("agent_port.api.google_login.httpx.AsyncClient", _FakeGoogleAsyncClient)
+    monkeypatch.setattr("sutr.api.google_login.httpx.AsyncClient", _FakeGoogleAsyncClient)
 
     engine = create_engine(
         "sqlite:///:memory:",

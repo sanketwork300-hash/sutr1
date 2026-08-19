@@ -26,7 +26,7 @@ export default function OAuthSuccessPage() {
             <CheckCircle2 size={24} style={{ color: '#fff' }} />
           </div>
           <h1 style={headingStyle}>Connected successfully</h1>
-          <p style={subtitleStyle}>AgentPort</p>
+          <p style={subtitleStyle}>Sutr</p>
         </div>
 
         {clientName && (
@@ -54,7 +54,7 @@ export default function OAuthSuccessPage() {
           <iframe src={redirectUrl} style={{ display: 'none' }} title="OAuth callback" sandbox="" />
         )}
       </div>
-      <p style={footerStyle}>AgentPort</p>
+      <p style={footerStyle}>Sutr</p>
     </div>
   )
 }

@@ -2,10 +2,10 @@
 
 import pytest
 
-from agent_port.openapi.compiler import CompileFilters, assign_tool_names, compile_definition
-from agent_port.openapi.errors import OpenAPIError
-from agent_port.openapi.normalizer import normalize, substitute_server_url
-from agent_port.openapi.security import translate_security
+from sutr.openapi.compiler import CompileFilters, assign_tool_names, compile_definition
+from sutr.openapi.errors import OpenAPIError
+from sutr.openapi.normalizer import normalize, substitute_server_url
+from sutr.openapi.security import translate_security
 
 
 def _spec(paths: dict, *, components: dict | None = None, security=None, servers=None) -> dict:

@@ -1,5 +1,5 @@
 /*
- * Tiny syntax highlighter for AgentPort docs.
+ * Tiny syntax highlighter for Sutr docs.
  * Mirrors the app's tokenizers (ui/src/components/playground/ResponsePanel.tsx)
  * and emits <span style="color: var(--syn-*)"> so colors track light/dark theme.
  */

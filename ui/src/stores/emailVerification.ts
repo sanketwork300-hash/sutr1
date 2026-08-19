@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-const STORAGE_KEY = 'agent_port_email_verification'
+const STORAGE_KEY = 'sutr_email_verification'
 
 export interface PendingEmailVerification {
   email: string

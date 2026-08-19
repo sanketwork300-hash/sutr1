@@ -3,7 +3,7 @@ title: Configuration
 nav_title: Configuration
 ---
 
-# Configuring a self-hosted AgentPort
+# Configuring a self-hosted Sutr
 
 Everything below is configured via environment variables, most commonly set in the `.env` file next to `docker-compose.prod.yml`. After editing `.env`, apply changes with:
 
@@ -18,7 +18,7 @@ docker compose -f docker-compose.prod.yml up -d
 | `DOMAIN` | *(required)* | The hostname Caddy serves and requests a cert for. |
 | `LETSENCRYPT_EMAIL` | *(required)* | Contact email Let's Encrypt uses for expiry warnings. |
 | `JWT_SECRET_KEY` | auto-generated on first boot | Signs session JWTs. If unset, the container writes one to `/data/jwt_secret` and reuses it across restarts. Set it explicitly if you want to pin or rotate it. |
-| `DATABASE_URL` | `sqlite:////data/agent_port.db` | See [Postgres](#using-postgres) below to point at a separate database. |
+| `DATABASE_URL` | `sqlite:////data/sutr.db` | See [Postgres](#using-postgres) below to point at a separate database. |
 | `SKIP_EMAIL_VERIFICATION` | `true` (in prod compose) | Leave as-is if you haven't configured email; set to `false` once `RESEND_API_KEY` is set. |
 | `BASE_URL` / `UI_BASE_URL` | `https://${DOMAIN}` | Usually don't touch — the compose file derives these from `DOMAIN`. |
 | `OAUTH_CALLBACK_URL` | `https://${DOMAIN}/api/auth/callback` | Must exactly match the redirect URI registered in each OAuth app. |
@@ -27,9 +27,9 @@ docker compose -f docker-compose.prod.yml up -d
 
 ## Backups
 
-AgentPort's persistent state lives in two Docker volumes:
+Sutr's persistent state lives in two Docker volumes:
 
-- `agentport_data` — SQLite database, generated JWT secret, and anything else the server writes to `/data`.
+- `sutr_data` — SQLite database, generated JWT secret, and anything else the server writes to `/data`.
 - `caddy_data` — Let's Encrypt account key and issued certificates. Losing it only means Caddy will request fresh certs on next boot (subject to Let's Encrypt's rate limits).
 
 ### Backing up SQLite
@@ -37,11 +37,11 @@ AgentPort's persistent state lives in two Docker volumes:
 Use `sqlite3`'s online backup so you don't risk a half-written file:
 
 ```sh
-docker compose -f docker-compose.prod.yml exec agentport \
-  sqlite3 /data/agent_port.db ".backup /data/backup.db"
+docker compose -f docker-compose.prod.yml exec sutr \
+  sqlite3 /data/sutr.db ".backup /data/backup.db"
 
 docker compose -f docker-compose.prod.yml cp \
-  agentport:/data/backup.db ./backup-$(date +%Y%m%d).db
+  sutr:/data/backup.db ./backup-$(date +%Y%m%d).db
 ```
 
 A cron on the host that runs this daily and ships the file off-box (S3, rsync, restic) is the minimum viable strategy.
@@ -51,20 +51,20 @@ A cron on the host that runs this daily and ships the file off-box (S3, rsync, r
 ```sh
 docker compose -f docker-compose.prod.yml down
 docker compose -f docker-compose.prod.yml cp \
-  ./backup-20260422.db agentport:/data/agent_port.db
+  ./backup-20260422.db sutr:/data/sutr.db
 docker compose -f docker-compose.prod.yml up -d
 ```
 
 ## Using Postgres
 
-SQLite is fine for small installs, but it's single-writer and lives on whatever disk the container's volume is on. But for more serious usage, consider pointing AgentPort at a separate Postgres instance.
+SQLite is fine for small installs, but it's single-writer and lives on whatever disk the container's volume is on. But for more serious usage, consider pointing Sutr at a separate Postgres instance.
 
 ### Managed Postgres (recommended)
 
 Create a database on PlanetScale, Supabase, Neon, Fly Postgres, etc. Then set:
 
 ```end
-DATABASE_URL=postgresql+psycopg2://USER:PASSWORD@HOST:5432/agentport?sslmode=require
+DATABASE_URL=postgresql+psycopg2://USER:PASSWORD@HOST:5432/sutr?sslmode=require
 ```
 
 And restart:
@@ -77,28 +77,28 @@ Migrations run automatically on boot (`alembic upgrade head`). The first start a
 
 ### Postgres in the same compose
 
-If you'd rather run Postgres alongside AgentPort, add a service to `docker-compose.prod.yml`:
+If you'd rather run Postgres alongside Sutr, add a service to `docker-compose.prod.yml`:
 
 ```yaml
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: agentport
+      POSTGRES_USER: sutr
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      POSTGRES_DB: agentport
+      POSTGRES_DB: sutr
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agentport"]
+      test: ["CMD-SHELL", "pg_isready -U sutr"]
       interval: 10s
 
-# ... then under the `agentport` service:
+# ... then under the `sutr` service:
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+psycopg2://agentport:${POSTGRES_PASSWORD}@postgres:5432/agentport
+      DATABASE_URL: postgresql+psycopg2://sutr:${POSTGRES_PASSWORD}@postgres:5432/sutr
 
 # ... and at the bottom:
 volumes:
@@ -109,7 +109,7 @@ volumes:
 
 There's no in-place migration. The typical path is:
 
-1. Export data from the SQLite file (`sqlite3 agent_port.db .dump > dump.sql`).
+1. Export data from the SQLite file (`sqlite3 sutr.db .dump > dump.sql`).
 2. Hand-translate the schema differences or restore from Alembic (run migrations on an empty Postgres, then load just the data rows).
 3. Point `DATABASE_URL` at Postgres and restart.
 
@@ -132,7 +132,7 @@ That caps each container's logs at ~30 MB on disk.
 
 ## Resource limits
 
-On a shared host you want a runaway not to OOM the whole machine. Add under the `agentport` service:
+On a shared host you want a runaway not to OOM the whole machine. Add under the `sutr` service:
 
 ```yaml
     deploy:
@@ -147,7 +147,7 @@ On a shared host you want a runaway not to OOM the whole machine. Add under the 
 
 ## Google sign-in
 
-Completely independent from the Google integration (Gmail, Calendar). This is only if you want users to log into AgentPort itself via Google:
+Completely independent from the Google integration (Gmail, Calendar). This is only if you want users to log into Sutr itself via Google:
 
 ```env
 GOOGLE_LOGIN_CLIENT_ID=...
@@ -158,7 +158,7 @@ Without these set, the "Continue with Google" button still renders on the login 
 
 ## PostHog analytics
 
-If you want AgentPort to send product analytics, set your PostHog project token and optionally override the host:
+If you want Sutr to send product analytics, set your PostHog project token and optionally override the host:
 
 ```env
 POSTHOG_PROJECT_TOKEN=...
@@ -166,7 +166,7 @@ POSTHOG_HOST=https://us.i.posthog.com
 VITE_PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
 ```
 
-If you omit either host, AgentPort defaults to US ingestion. Use `https://eu.i.posthog.com` for EU-hosted PostHog projects, and keep `POSTHOG_HOST` and `VITE_PUBLIC_POSTHOG_HOST` aligned.
+If you omit either host, Sutr defaults to US ingestion. Use `https://eu.i.posthog.com` for EU-hosted PostHog projects, and keep `POSTHOG_HOST` and `VITE_PUBLIC_POSTHOG_HOST` aligned.
 
 Because `VITE_PUBLIC_POSTHOG_HOST` is compiled into the UI bundle, changing it requires a rebuild:
 

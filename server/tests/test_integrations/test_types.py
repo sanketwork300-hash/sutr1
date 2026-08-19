@@ -1,4 +1,4 @@
-from agent_port.integrations.types import (
+from sutr.integrations.types import (
     ApiTool,
     CustomIntegration,
     CustomTool,

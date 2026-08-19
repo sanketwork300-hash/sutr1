@@ -1,4 +1,4 @@
-# AgentPort
+# Sutr
 
 ## What This Is
 
@@ -28,7 +28,7 @@ A universal tool gateway for AI agents. One place to manage every external capab
 Claude Desktop / VS Code / any MCP client
            │  MCP protocol (StreamableHTTP)
      ┌─────▼──────────────────────┐
-     │     AgentPort server        │  :4747  (Python / FastAPI)
+     │     Sutr server        │  :4747  (Python / FastAPI)
      │  /mcp  → MCP endpoint       │  ← aggregates all integrations
      │  /api  → REST API           │  ← management
      │  /docs → Swagger UI         │  ← auto-generated
@@ -61,7 +61,7 @@ Do this before committing. No exceptions.
 
 This is a hard rule, not a preference:
 
-- `server/src/agent_port/api/` — **one file per API resource.** Never combine resources into one file. If a resource grows beyond a single file, it becomes a directory with sub-files by concern.
+- `server/src/sutr/api/` — **one file per API resource.** Never combine resources into one file. If a resource grows beyond a single file, it becomes a directory with sub-files by concern.
 - `cli/src/commands/` — **one file per command group.** Same rule.
 - Prefer 5 focused 50-line files over 1 sprawling 250-line file.
 - Never create a `utils.py` or `helpers.ts` dumping ground. If logic is shared, name it after what it actually does.
@@ -94,13 +94,13 @@ To add a page: drop a new `.md` file in `pages/` and add a link to the sidebar i
 ## Project Layout
 
 ```
-agentport/
+sutr/
 ├── AGENTS.md           ← this file
 ├── CLAUDE.md           ← symlink to AGENTS.md
 ├── docs/               ← documentation (keep up to date — see above)
 ├── server/             ← Python / FastAPI
 │   ├── pyproject.toml
-│   └── src/agent_port/
+│   └── src/sutr/
 │       ├── api/        ← one file per resource
 │       ├── models/     ← SQLModel tables
 │       ├── mcp/        ← MCP server + proxy + upstream client

@@ -30,7 +30,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PYTHONUNBUFFERED=1 \
-    DATABASE_URL=sqlite:////data/agent_port.db
+    DATABASE_URL=sqlite:////data/sutr.db
 
 WORKDIR /app/server
 

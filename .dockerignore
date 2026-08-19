@@ -10,7 +10,7 @@ ui/node_modules
 cli/node_modules
 
 # Dev artifacts
-server/agent_port.db
+server/sutr.db
 server/uploads
 **/*.egg-info
 
