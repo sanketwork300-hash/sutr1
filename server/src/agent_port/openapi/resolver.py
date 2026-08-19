@@ -4,9 +4,11 @@ Design (Sutr spec §18):
 - Only internal references (`#/...`) are resolved. External references (files,
   URLs) are rejected outright — following them from an untrusted document is
   an SSRF/file-read primitive.
-- A resolution *stack* detects cycles: when a pointer already on the stack is
-  referenced again, the reference is replaced by a bounded placeholder object
-  instead of recursing (A → B → C → A terminates).
+- Cycle detection tracks every JSON-Pointer location on the current traversal
+  path (definition sites and ref targets alike): a `$ref` to any ancestor
+  location is replaced by a bounded placeholder object instead of recursing,
+  so both A → A at its own definition site and A → B → C → A terminate at the
+  first re-entry.
 - A depth cap backstops pathological non-cyclic nesting.
 - Resolution is applied structurally (deep-copy semantics), so the result is a
   plain dict tree that can be traversed without ever consulting `$ref` again.
@@ -65,15 +67,21 @@ def resolve_refs(document: dict) -> dict:
     max_structural_depth = 400
     max_output_nodes = 500_000
     node_budget = [max_output_nodes]
+    # Every JSON-Pointer location on the current DFS path. Mutated push/pop
+    # style (an immutable copy per node would make deep documents quadratic).
+    on_path: set[str] = set()
 
-    def resolve(node: Any, stack: tuple[str, ...], structural_depth: int) -> Any:
+    def escape(part: str) -> str:
+        return part.replace("~", "~0").replace("/", "~1")
+
+    def resolve(node: Any, ref_depth: int, structural_depth: int, pointer: str) -> Any:
         node_budget[0] -= 1
         if node_budget[0] < 0:
             raise OpenAPIError(
                 "expansion_too_large",
                 "Resolving the document's references expands it beyond the allowed size.",
             )
-        if len(stack) > MAX_REF_DEPTH:
+        if ref_depth > MAX_REF_DEPTH:
             raise OpenAPIError(
                 "ref_depth_exceeded",
                 f"Reference nesting exceeds the maximum depth of {MAX_REF_DEPTH}.",
@@ -81,13 +89,23 @@ def resolve_refs(document: dict) -> dict:
         if structural_depth > max_structural_depth:
             raise OpenAPIError("document_too_deep", "The document is nested too deeply to process.")
 
+        def descend(child: Any, child_pointer: str, next_ref_depth: int) -> Any:
+            inserted = child_pointer not in on_path
+            if inserted:
+                on_path.add(child_pointer)
+            try:
+                return resolve(child, next_ref_depth, structural_depth + 1, child_pointer)
+            finally:
+                if inserted:
+                    on_path.discard(child_pointer)
+
         if isinstance(node, dict):
             ref = node.get("$ref")
             if isinstance(ref, str):
-                if ref in stack:
+                if ref in on_path:
                     return _cycle_placeholder(ref)
                 target = _lookup_pointer(document, ref)
-                resolved = resolve(target, stack + (ref,), structural_depth + 1)
+                resolved = descend(target, ref, ref_depth + 1)
                 # Per JSON Reference, siblings of $ref are ignored in 3.0; in
                 # 3.1 `description`/`summary` may sit alongside and win.
                 if isinstance(resolved, dict):
@@ -95,11 +113,15 @@ def resolve_refs(document: dict) -> dict:
                     if extras:
                         resolved = {**resolved, **extras}
                 return resolved
-            return {k: resolve(v, stack, structural_depth + 1) for k, v in node.items()}
+            return {
+                k: descend(v, f"{pointer}/{escape(k)}", ref_depth) for k, v in node.items()
+            }
 
         if isinstance(node, list):
-            return [resolve(item, stack, structural_depth + 1) for item in node]
+            return [
+                descend(item, f"{pointer}/{i}", ref_depth) for i, item in enumerate(node)
+            ]
 
         return node
 
-    return resolve(document, (), 0)
+    return resolve(document, 0, 0, "#")

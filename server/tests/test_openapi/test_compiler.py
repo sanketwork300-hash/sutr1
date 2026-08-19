@@ -34,7 +34,25 @@ def _op(summary="Do the thing", operation_id=None, tags=None, **extra) -> dict:
 
 
 def test_basic_compile_names_from_operation_id():
-    definition = normalize(_spec({"/users/{id}": {"get": _op(operation_id="getUserById")}}))
+    definition = normalize(
+        _spec(
+            {
+                "/users/{id}": {
+                    "get": _op(
+                        operation_id="getUserById",
+                        parameters=[
+                            {
+                                "name": "id",
+                                "in": "path",
+                                "required": True,
+                                "schema": {"type": "string"},
+                            }
+                        ],
+                    )
+                }
+            }
+        )
+    )
     result = compile_definition(definition)
     tool = result.tools[0].tool
     assert tool.name == "get_user_by_id"
@@ -49,11 +67,12 @@ def test_name_from_method_and_path_when_no_operation_id():
 
 
 def test_collision_resolved_deterministically():
-    # Both operations claim operationId list_users → both get path-qualified names.
+    # Distinct operationIds (the spec requires uniqueness) that normalize to
+    # the same snake_case base → both get path-qualified names.
     definition = normalize(
         _spec(
             {
-                "/users": {"get": _op(operation_id="list_users")},
+                "/users": {"get": _op(operation_id="listUsers")},
                 "/admin/users": {"get": _op(operation_id="list_users")},
             }
         )
@@ -64,15 +83,12 @@ def test_collision_resolved_deterministically():
     assert all(ct.renamed_from == "list_users" for ct in result.tools)
 
 
-def test_collision_with_identical_paths_gets_numeric_suffix():
-    ops = [
-        type("Op", (), {})()  # placeholder — built via normalize below instead
-    ]
+def test_collision_with_identical_paths_disambiguated_by_method():
     definition = normalize(
         _spec(
             {
                 "/users": {
-                    "get": _op(operation_id="users_op"),
+                    "get": _op(operation_id="usersOp"),
                     "post": _op(operation_id="users_op"),
                 }
             }
@@ -81,7 +97,6 @@ def test_collision_with_identical_paths_gets_numeric_suffix():
     names = assign_tool_names(definition.operations)
     finals = sorted(name for name, _ in names.values())
     assert finals == ["get_users", "post_users"]
-    del ops
 
 
 def test_path_params_and_query_params():
