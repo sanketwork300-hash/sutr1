@@ -394,6 +394,38 @@ CLI equivalents: `sutr openapi import|list|show|compile|package|delete`.
 
 ---
 
+## Deployments
+
+Run generated MCP servers on a deployment provider. The local Docker provider builds the package into an image and runs it as a container bound to `127.0.0.1` on an ephemeral port, serving MCP at `/mcp` and a health probe at `/health`. It is disabled on cloud instances and can be turned off with `DEPLOY_DOCKER_ENABLED=false`. Kubernetes / Argo CD / Swaraj Cloud providers plug into the same interface.
+
+All mutations require `deployments:manage` (owner/admin/developer) and are audited. The optional upstream `token` is stored through the secrets backend and injected as an environment variable at run time — never baked into the image or the package.
+
+### `POST /api/deployments`
+
+```json
+{
+  "project_id": "<openapi project uuid>",
+  "name": "Petstore prod",
+  "provider": "docker",
+  "token": "sk_live_...",
+  "compile": { "filters": {"exclude_tags": ["admin"]}, "server_url": "https://api.example.com" }
+}
+```
+
+Returns `201` with `status: "queued"`; the build runs in the background (`queued → building → running | failed`). Poll `GET /api/deployments/{id}`.
+
+### Other endpoints
+
+- `GET /api/deployments` / `GET /api/deployments/{id}` — list/detail; stored status is reconciled with the provider's live state.
+- `GET /api/deployments/providers` — provider availability.
+- `GET /api/deployments/{id}/logs?tail=100` — container logs.
+- `POST /api/deployments/{id}/stop` / `/start` — lifecycle.
+- `DELETE /api/deployments/{id}` — removes the container and image, deletes the stored token.
+
+CLI equivalents: `sutr deploy providers|list|create|status|logs|stop|start|delete`.
+
+---
+
 ## Installed integrations
 
 Manage configured instances of integrations, scoped to your organization.

@@ -36,6 +36,7 @@ from sutr.api import (  # noqa: E402
     billing,
     custom_api,
     custom_mcp,
+    deployments,
     email_verification,
     google_login,
     installed,
@@ -294,6 +295,7 @@ app.include_router(auth.router)
 app.include_router(tools.router)
 app.include_router(tool_settings.router)
 app.include_router(openapi_projects.router)
+app.include_router(deployments.router)
 app.include_router(org_settings.router)
 app.include_router(orgs.router)
 app.include_router(orgs.accept_router)

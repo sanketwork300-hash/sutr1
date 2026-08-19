@@ -294,6 +294,38 @@ export interface OpenApiCompileResult {
   project?: OpenApiProject
 }
 
+export interface Deployment {
+  id: string
+  name: string
+  slug: string
+  provider: string
+  status: string
+  url: string | null
+  health_url?: string | null
+  error: string | null
+  tool_count: number
+  project_id: string | null
+  env_var: string | null
+  has_token: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface DeploymentProviderInfo {
+  id: string
+  display_name: string
+  enabled: boolean
+  reason: string | null
+}
+
+export interface CreateDeploymentRequest {
+  project_id: string
+  name: string
+  provider: string
+  token?: string | null
+  compile?: OpenApiCompileRequest
+}
+
 export interface CreateCustomMcpRequest {
   name: string
   url: string
@@ -735,6 +767,39 @@ export const api = {
     },
     remove(id: string) {
       return request<void>(`/openapi/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    },
+  },
+  deployments: {
+    providers() {
+      return request<DeploymentProviderInfo[]>('/deployments/providers')
+    },
+    list() {
+      return request<Deployment[]>('/deployments')
+    },
+    create(data: CreateDeploymentRequest) {
+      return request<Deployment>('/deployments', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      })
+    },
+    get(id: string) {
+      return request<Deployment>(`/deployments/${encodeURIComponent(id)}`)
+    },
+    logs(id: string, tail = 200) {
+      return request<{ logs: string }>(`/deployments/${encodeURIComponent(id)}/logs?tail=${tail}`)
+    },
+    stop(id: string) {
+      return request<Deployment>(`/deployments/${encodeURIComponent(id)}/stop`, {
+        method: 'POST',
+      })
+    },
+    start(id: string) {
+      return request<Deployment>(`/deployments/${encodeURIComponent(id)}/start`, {
+        method: 'POST',
+      })
+    },
+    remove(id: string) {
+      return request<void>(`/deployments/${encodeURIComponent(id)}`, { method: 'DELETE' })
     },
   },
   installed: {

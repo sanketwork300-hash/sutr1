@@ -51,6 +51,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "logs:read": _ALL,
     # Read the control-plane audit trail.
     "audit:read": frozenset({"owner", "admin"}),
+    # Create/start/stop/delete deployments of generated MCP servers.
+    "deployments:manage": frozenset({"owner", "admin", "developer"}),
 }
 
 

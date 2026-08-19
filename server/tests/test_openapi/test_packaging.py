@@ -180,6 +180,52 @@ def test_generated_tests_pass(extracted):
     assert "passed" in proc.stdout
 
 
+def test_generated_server_serves_http_health(extracted):
+    """--transport http boots and serves the /health probe (used by the
+    deployment engine's providers for monitoring)."""
+    import socket
+    import time
+    import urllib.request
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "server.py",
+            "--transport",
+            "http",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ],
+        cwd=extracted,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    try:
+        deadline = time.time() + 30
+        body = None
+        while time.time() < deadline:
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as r:
+                    body = json.loads(r.read())
+                    break
+            except OSError:
+                if proc.poll() is not None:
+                    raise AssertionError(proc.stdout.read().decode(errors="replace"))
+                time.sleep(0.3)
+        assert body is not None, "server never became healthy"
+        assert body["status"] == "ok"
+        assert body["tools"] == 3
+    finally:
+        proc.kill()
+        proc.wait(timeout=10)
+
+
 async def test_package_endpoint_returns_zip_and_audits(client, session, test_org):
     from tests.test_api.test_openapi_projects import PETSTORE
 

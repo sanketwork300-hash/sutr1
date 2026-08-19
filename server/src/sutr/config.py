@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     google_login_client_id: str = ""
     google_login_client_secret: str = ""
 
+    # Deployment engine: allow the local Docker provider (self-hosted only —
+    # the registry additionally refuses it whenever is_cloud is set).
+    deploy_docker_enabled: bool = True
+
     # Secrets backend: "db" (default) or "db_kms".
     secrets_backend: str = "db"
     # AWS KMS options (only used when secrets_backend = "db_kms").

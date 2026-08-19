@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { authCommand } from "./commands/auth.js";
+import { deployCommand } from "./commands/deploy.js";
 import { integrationsCommand } from "./commands/integrations.js";
 import { openapiCommand } from "./commands/openapi.js";
 import { outputCommand } from "./commands/output.js";
@@ -15,6 +16,7 @@ program
   .version(__VERSION__);
 
 program.addCommand(authCommand);
+program.addCommand(deployCommand);
 program.addCommand(integrationsCommand);
 program.addCommand(openapiCommand);
 program.addCommand(outputCommand);
