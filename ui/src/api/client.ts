@@ -311,6 +311,23 @@ export interface Deployment {
   updated_at: string
 }
 
+export interface AuditEvent {
+  id: number
+  org_id: string
+  timestamp: string
+  action: string
+  actor_type: string
+  actor_user_id: string | null
+  actor_api_key_prefix: string | null
+  impersonator_user_id: string | null
+  target_type: string | null
+  target_id: string | null
+  summary: string
+  metadata_json: string
+  ip: string | null
+  user_agent: string | null
+}
+
 export interface UsageSummary {
   start: string
   end: string
@@ -888,10 +905,17 @@ export const api = {
     },
   },
   logs: {
-    list(params?: { integration?: string; tool?: string; limit?: number; offset?: number }) {
+    list(params?: {
+      integration?: string
+      tool?: string
+      outcome?: string
+      limit?: number
+      offset?: number
+    }) {
       const q = new URLSearchParams()
       if (params?.integration) q.set('integration', params.integration)
       if (params?.tool) q.set('tool', params.tool)
+      if (params?.outcome) q.set('outcome', params.outcome)
       if (params?.limit) q.set('limit', String(params.limit))
       if (params?.offset) q.set('offset', String(params.offset))
       const qs = q.toString()
@@ -906,7 +930,23 @@ export const api = {
       )
     },
   },
+  audit: {
+    list(params?: { action?: string; limit?: number; offset?: number }) {
+      const qs = new URLSearchParams()
+      if (params?.action) qs.set('action', params.action)
+      qs.set('limit', String(params?.limit ?? 100))
+      qs.set('offset', String(params?.offset ?? 0))
+      return request<AuditEvent[]>(`/audit?${qs}`)
+    },
+  },
   approvals: {
+    list(params?: { status?: string; limit?: number; offset?: number }) {
+      const qs = new URLSearchParams()
+      if (params?.status) qs.set('status', params.status)
+      qs.set('limit', String(params?.limit ?? 100))
+      qs.set('offset', String(params?.offset ?? 0))
+      return request<ApprovalRequest[]>(`/tool-approvals/requests?${qs}`)
+    },
     get(id: string) {
       return request<ApprovalRequest>(`/tool-approvals/requests/${id}`)
     },

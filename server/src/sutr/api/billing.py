@@ -5,6 +5,7 @@ from typing import Literal
 import stripe
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
 from sutr.billing.webhook import handle_event
@@ -13,6 +14,7 @@ from sutr.db import get_session
 from sutr.dependencies import get_current_org, get_current_user
 from sutr.models.org import Org
 from sutr.models.org_membership import OrgMembership
+from sutr.models.processed_stripe_event import ProcessedStripeEvent
 from sutr.models.subscription import Subscription
 from sutr.models.user import User
 
@@ -146,10 +148,29 @@ async def stripe_webhook(
     except (ValueError, stripe.SignatureVerificationError) as exc:
         raise HTTPException(status_code=400, detail="invalid_signature") from exc
 
+    event_id = event["id"] if "id" in event else None
+    event_type = event["type"] if "type" in event else ""
+
+    # Stripe retries until it gets a 2xx, so the same event arrives more than
+    # once in normal operation. Claim the id first: the insert is the lock, and
+    # committing it in the same transaction as the handler's writes means a
+    # failed handler rolls the claim back and the retry is still processed.
+    if event_id:
+        if session.get(ProcessedStripeEvent, event_id) is not None:
+            logger.info("Ignoring already-processed Stripe event %s (%s)", event_id, event_type)
+            return {"received": True, "duplicate": True}
+        session.add(ProcessedStripeEvent(event_id=event_id, event_type=event_type))
+
     try:
         handle_event(event, session)
+        session.commit()
+    except IntegrityError:
+        # A concurrent delivery of the same event won the race.
+        session.rollback()
+        logger.info("Concurrent delivery of Stripe event %s ignored", event_id)
+        return {"received": True, "duplicate": True}
     except Exception:
-        event_id = event["id"] if "id" in event else None
+        session.rollback()
         logger.exception("Failed to handle Stripe event %s", event_id)
         raise HTTPException(status_code=500, detail="handler_error")
     return {"received": True}

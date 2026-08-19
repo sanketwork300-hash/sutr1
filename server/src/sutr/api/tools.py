@@ -127,6 +127,22 @@ async def call_tool(
     ctx = _call_context(agent_auth, request, body.additional_info)
     gate = evaluate_gate(session, ctx, integration_id, body.tool_name, body.args)
 
+    if gate.status == "rate_limited":
+        return JSONResponse(
+            status_code=429,
+            headers={"Retry-After": str(gate.retry_after or 60)},
+            content={
+                "error": "rate_limited",
+                "message": (
+                    "This organization has exceeded its tool-call rate limit. "
+                    f"Retry in {gate.retry_after or 60}s."
+                ),
+                "retry_after": gate.retry_after,
+                "integration_id": integration_id,
+                "tool_name": body.tool_name,
+            },
+        )
+
     if gate.status == "denied":
         return JSONResponse(
             status_code=403,

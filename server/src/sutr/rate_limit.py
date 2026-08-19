@@ -12,6 +12,8 @@ from collections import deque
 
 from fastapi import HTTPException, Request
 
+from sutr.config import settings
+
 # Login-failure policy — exposed as module constants so callers and tests
 # can reference the numbers directly alongside the configured limiter.
 IP_WINDOW_SECONDS = 15 * 60
@@ -121,4 +123,18 @@ login_failure_ip_limiter = IPRateLimiter(
     name="login-failure",
     max_requests=IP_MAX_ATTEMPTS_PER_WINDOW,
     window_seconds=IP_WINDOW_SECONDS,
+)
+
+# The window store is keyed by an arbitrary string, so the same class serves
+# non-IP keys. This alias names that honestly at the call site.
+SlidingWindowRateLimiter = IPRateLimiter
+
+# Tool execution, keyed by org (not IP): a runaway agent loop is the realistic
+# failure mode, and it arrives from one credential rather than one address.
+# Checked inside the canonical pipeline so REST and MCP are limited alike.
+# 0 in settings disables it; the window is fixed at one minute.
+tool_call_limiter = SlidingWindowRateLimiter(
+    name="tool-call",
+    max_requests=settings.tool_rate_limit_per_minute,
+    window_seconds=60,
 )

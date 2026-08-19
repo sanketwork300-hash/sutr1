@@ -12,17 +12,17 @@ def test_store_returns_secret_payload():
 
 def test_retrieve_returns_stored_value():
     backend = DBSecretsBackend()
-    secret = Secret(kind="test", storage_backend="db", value="my-secret", value_hash="h")
+    secret = Secret(kind="test", storage_backend="db", value="my-secret")
     assert backend.retrieve(secret) == "my-secret"
 
 
 def test_retrieve_none():
     backend = DBSecretsBackend()
-    secret = Secret(kind="test", storage_backend="db", value=None, value_hash="h")
+    secret = Secret(kind="test", storage_backend="db", value=None)
     assert backend.retrieve(secret) is None
 
 
 def test_delete_is_noop():
     backend = DBSecretsBackend()
-    secret = Secret(kind="test", storage_backend="db", value=None, value_hash="h")
+    secret = Secret(kind="test", storage_backend="db", value=None)
     backend.delete(secret)  # should not raise

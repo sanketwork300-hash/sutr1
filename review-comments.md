@@ -1,15 +1,43 @@
-The custom API feature introduces security issues around stored token reuse and dispatch-time URL safety, and it also has update semantics that break auth mode changes and description clearing. These should be fixed before considering the patch correct.
+# Custom API review — resolution status
 
-Full review comments:
+Original review of the custom-API feature (stored token reuse, dispatch-time URL
+safety, and update semantics). **All four findings are resolved and locked down
+by regression tests** in `server/tests/test_security/test_review_findings.py`,
+verified 2026-08-20 (Sutr Phase 13).
 
-- [P1] Keep stored test tokens on the saved endpoint — /workspace/server/src/sutr/api/custom_api.py:401-406
-  When `integration_db_id` is supplied and the override token is blank, this copies the installed secret into `token` before the request still uses caller-supplied `base_url`, `token_header`, and `token_format` below. A caller can set `base_url` to a public domain they control and omit `token` to have Sutr send the stored API token to that domain, despite the UI/API never revealing the secret. Only reuse the stored token when the tested target/auth config matches the saved integration, or require an explicit override token for arbitrary test URLs.
+---
 
-- [P1] Revalidate custom API targets when dispatching — /workspace/server/src/sutr/api_client.py:233-240
-  For installed custom API tool calls, this helper streams to the constructed `url` without the safety check used when the definition was saved/tested. If a user-controlled hostname passes validation and later DNS-rebinds to loopback, RFC1918, or metadata IPs, normal `/api/tools`/MCP calls will resolve it at request time and reach the blocked network. Re-run the safe-URL check for the full URL at dispatch time and/or pin the validated address for the actual connection.
+- **[P1] Keep stored test tokens on the saved endpoint** — `api/custom_api.py`
+  **Resolved.** `/custom-api/test` injects the stored token only when the tested
+  target matches the saved connection on all three of `base_url`,
+  `token_header`, and `token_format` (`same_target`). Swapping `base_url` to an
+  attacker-controlled domain while omitting `token` now sends no credential.
+  Tests: `test_p1_stored_token_is_not_leaked_to_a_swapped_base_url` (secret
+  absent from the dispatched headers) and
+  `test_p1_stored_token_is_used_for_the_matching_target` (the legitimate case
+  still authenticates — the mitigation did not just break the feature).
 
-- [P2] Validate auth changes after merging both fields — /workspace/server/src/sutr/api/custom_api.py:331-337
-  When switching an existing custom API between token auth and No auth, the PATCH payload contains both new values, but these branches validate each field against the other field's old value. For example changing to No auth first checks `('', 'Bearer {token}')` and returns 400, so the auth preset cannot be changed even though the final pair `('', '')` is valid. Compute the final header/format pair and validate it once before assigning.
+- **[P1] Revalidate custom API targets when dispatching** — `api_client.py`
+  **Resolved for the check; DNS pinning remains a documented limitation.**
+  `dispatch_api_tool` re-runs `validate_safe_url` on the fully-constructed URL
+  immediately before connecting, so a hostname that passed validation at save
+  time and later resolves to loopback/RFC1918/metadata is refused at call time.
+  Test: `test_p1_dispatch_revalidates_the_full_url` asserts no connection is
+  attempted and an error result is returned.
+  *Still open:* the validated address is not pinned for the actual connection,
+  so a rebind inside the window between our resolution and httpx's own remains
+  theoretically possible. Closing it needs connect-to-IP with SNI preserved;
+  tracked as a known limitation rather than silently claimed fixed.
 
-- [P3] Allow clearing custom API descriptions — /workspace/server/src/sutr/api/custom_api.py:324-325
-  The builder sends `description: null` when a user deletes the optional description, but this guard treats explicit null the same as an omitted field and leaves the old description in the database. As a result, a saved description cannot be removed; distinguish field presence from null before deciding whether to assign `row.description`.
+- **[P2] Validate auth changes after merging both fields** — `api/custom_api.py`
+  **Resolved.** The PATCH handler computes the final `(header, format)` pair and
+  validates it once, so token-auth ⇄ no-auth transitions succeed. Tests cover
+  both directions plus `test_p2_an_invalid_merged_pair_is_still_rejected`, so
+  the fix did not turn into permissiveness.
+
+- **[P3] Allow clearing custom API descriptions** — `api/custom_api.py`
+  **Resolved in Phase 13** (this was still open when the phase began). The
+  handler now distinguishes an absent field from an explicit `null` via
+  pydantic's `model_fields_set`, so the builder's `description: null` clears the
+  stored text while an omitted field leaves it untouched. Tests cover clear,
+  omit, and replace.

@@ -936,6 +936,10 @@ Query tool call logs for your org.
 
 The `outcome` field can be: `executed`, `pending` (awaiting human approval), `approved` (decided, not yet executed), `denied`, or `error`. Rows written by older versions may carry `approval_required`, the legacy spelling of `pending`.
 
+Reading logs requires a **user session**, not an API key: the rows contain every caller's tool arguments and results. Agents and SDKs should read `/api/usage/*` instead, which is metering data and is key-readable.
+
+Tool execution is rate limited per organization (`TOOL_RATE_LIMIT_PER_MINUTE`, default 120/min). Exceeding it returns `429` with `Retry-After`; refusals are logged nowhere and metered nowhere, because no upstream work happened.
+
 `additional_info` carries the agent's optional explanation for the call (if any was supplied).
 
 ---

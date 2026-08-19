@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { api, type OrgSettingsResponse, type TotpStatusResponse } from '@/api/client'
 import { MembersSection } from '@/components/settings/MembersSection'
+import { WorkspacesPanel } from '@/components/settings/WorkspacesPanel'
 import { TotpCodeDialog } from '@/components/totp/TotpCodeDialog'
 import { TotpSetupDialog } from '@/components/totp/TotpSetupDialog'
 import { useIsMobile } from '@/lib/useMediaQuery'
@@ -78,6 +79,9 @@ export default function SettingsPage() {
         >
           <SectionLabel>Organization</SectionLabel>
           <MembersSection />
+
+          <SectionLabel>Workspaces</SectionLabel>
+          <WorkspacesPanel />
 
           <SectionLabel>Approvals</SectionLabel>
           <ApprovalExpiryPanel />

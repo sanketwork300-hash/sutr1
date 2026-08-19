@@ -52,6 +52,7 @@ from sutr.models.log import LogEntry
 from sutr.models.oauth import OAuthState
 from sutr.observability.metrics import observe_tool_call, observe_tool_gated
 from sutr.observability.tracing import span
+from sutr.rate_limit import tool_call_limiter
 from sutr.services.metering import record_tool_call
 from sutr.services.redaction import redact_args, redact_result
 
@@ -106,7 +107,7 @@ class CallContext:
 
 @dataclass
 class GateResult:
-    status: str  # "denied" | "approval_pending" | "ready"
+    status: str  # "denied" | "approval_pending" | "rate_limited" | "ready"
     args_hash: str | None
     approval_request_id: uuid.UUID | None = None
     # approval_pending only:
@@ -114,6 +115,8 @@ class GateResult:
     # ready only:
     access_reason: str | None = None  # "approved_once" | "approved_any" | None
     pending_log_id: int | None = None  # gate log to resolve in place at execution
+    # rate_limited only: seconds until the caller may retry.
+    retry_after: int | None = None
 
 
 @dataclass
@@ -146,6 +149,22 @@ def evaluate_gate(
     """Run policy + approval gating. Writes the denied log or the pending
     approval request (+ its gate log); execution side effects happen in
     `execute_tool`."""
+    # Brake before any other work: a runaway agent loop should cost one cheap
+    # in-memory check, not a policy lookup and an approval row. Keyed by org,
+    # because the realistic failure mode is one credential looping.
+    if tool_call_limiter.max_requests > 0:
+        retry_after = tool_call_limiter.check(str(ctx.org_id))
+        if retry_after:
+            observe_tool_gated(ctx.source, "rate_limited")
+            logger.warning(
+                "tool call rate limited: org=%s source=%s retry_after=%ss",
+                ctx.org_id,
+                ctx.source,
+                retry_after,
+            )
+            return GateResult(status="rate_limited", args_hash=None, retry_after=retry_after)
+        tool_call_limiter.record(str(ctx.org_id))
+
     decision = evaluate_policy(session, ctx.org_id, integration_id, tool_name, args)
 
     if not decision.allowed and decision.reason == "denied":

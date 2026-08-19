@@ -30,6 +30,7 @@ docker compose -f docker-compose.prod.yml up -d
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | *(empty)* | OTLP/HTTP collector URL, e.g. `http://collector:4318/v1/traces`. Omit to record spans without exporting. |
 | `OTEL_SERVICE_NAME` | `sutr` | Service name reported on spans. |
 | `DEPLOY_DOCKER_ENABLED` | `true` | Allows the local Docker deployment provider. Set `false` to disable deployments entirely. |
+| `TOOL_RATE_LIMIT_PER_MINUTE` | `120` | Tool executions allowed per organization per minute, enforced for REST and MCP alike. Refusals return `429` with `Retry-After` and are not metered. `0` disables the limit. |
 
 ## Backups
 

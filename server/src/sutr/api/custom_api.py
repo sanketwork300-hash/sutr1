@@ -324,7 +324,10 @@ def update_custom_api(
 
     if body.name is not None:
         row.name = body.name
-    if body.description is not None:
+    # Distinguish "field absent" from "explicitly null": the builder sends
+    # description: null when the user clears the optional field, and treating
+    # that like an omission left the old text in place forever.
+    if "description" in body.model_fields_set:
         row.description = body.description
     if body.base_url is not None and body.base_url != row.base_url:
         _validate_base_url(body.base_url)

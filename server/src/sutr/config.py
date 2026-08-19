@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     # the registry additionally refuses it whenever is_cloud is set).
     deploy_docker_enabled: bool = True
 
+    # Tool executions allowed per org per minute, enforced in the shared
+    # pipeline so REST and MCP are limited alike. 0 disables the limit.
+    tool_rate_limit_per_minute: int = 120
+
     # Observability. /metrics is off by default: it is an infrastructure
     # endpoint, so it must be a deliberate choice to expose it. When enabled,
     # setting METRICS_TOKEN additionally requires `Authorization: Bearer <token>`.

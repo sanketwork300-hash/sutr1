@@ -51,7 +51,6 @@ def test_retrieve_decrypts_secret(kms_backend):
         value=stored.value,
         encrypted_data_key=stored.encrypted_data_key,
         kms_key_id="kms-key",
-        value_hash="h",
     )
 
     result = backend.retrieve(secret)
@@ -68,7 +67,6 @@ def test_retrieve_none_without_payload(kms_backend):
         value=None,
         encrypted_data_key=None,
         kms_key_id="kms-key",
-        value_hash="h",
     )
 
     assert backend.retrieve(secret) is None

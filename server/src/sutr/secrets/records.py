@@ -1,4 +1,3 @@
-import hashlib
 from datetime import datetime
 from typing import TypeVar
 from uuid import UUID
@@ -10,14 +9,6 @@ from sutr.models.secret import Secret
 from sutr.secrets import secrets_backend
 
 TSecretOwner = TypeVar("TSecretOwner")
-
-
-def _hash_value(value: str) -> str:
-    return hashlib.sha256(value.encode()).hexdigest()
-
-
-def _prefix_value(value: str) -> str | None:
-    return value[:12] if value else None
 
 
 def upsert_secret(
@@ -45,8 +36,6 @@ def upsert_secret(
     secret.value = stored.value
     secret.encrypted_data_key = stored.encrypted_data_key
     secret.kms_key_id = stored.kms_key_id
-    secret.value_hash = _hash_value(value)
-    secret.prefix = _prefix_value(value)
     secret.updated_at = now
     session.add(secret)
     session.flush()

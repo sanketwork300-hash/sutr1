@@ -190,6 +190,13 @@ async def execute_upstream_tool(
 
         gate = evaluate_gate(session, ctx, integration_id, tool_name, arguments)
 
+    if gate.status == "rate_limited":
+        return _text(
+            "Rate limit reached for this organization's tool calls. Wait "
+            f"{gate.retry_after or 60} seconds before trying again — and if you are "
+            "looping, stop and reconsider the plan."
+        )
+
     if gate.status == "denied":
         return _text("This tool has been blocked and cannot be executed.")
 

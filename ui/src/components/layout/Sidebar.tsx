@@ -6,7 +6,9 @@ import {
   KeyRound,
   Puzzle,
   Rocket,
+  ScrollText,
   Settings,
+  ShieldQuestion,
   X,
 } from 'lucide-react'
 import { useThemeStore } from '../../stores/theme'
@@ -14,9 +16,11 @@ import { useConfigStore } from '@/stores/config'
 
 const navItems = [
   { to: '/integrations', label: 'Integrations', icon: Puzzle },
+  { to: '/approvals', label: 'Approvals', icon: ShieldQuestion },
   { to: '/deployments', label: 'Deployments', icon: Rocket },
   { to: '/connect', label: 'Connect', icon: KeyRound },
   { to: '/playground', label: 'Playground', icon: FlaskConical },
+  { to: '/activity', label: 'Activity', icon: ScrollText },
   { to: '/usage', label: 'Usage', icon: BarChart3 },
 ]
 

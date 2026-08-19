@@ -23,6 +23,7 @@ from sutr.models.openapi_project import OpenAPIProject  # noqa: F401
 from sutr.models.org import Org  # noqa: F401
 from sutr.models.org_invitation import OrgInvitation  # noqa: F401
 from sutr.models.org_membership import OrgMembership  # noqa: F401
+from sutr.models.processed_stripe_event import ProcessedStripeEvent  # noqa: F401
 from sutr.models.secret import Secret  # noqa: F401
 from sutr.models.subscription import Subscription  # noqa: F401
 from sutr.models.tool_approval_request import ToolApprovalRequest  # noqa: F401
