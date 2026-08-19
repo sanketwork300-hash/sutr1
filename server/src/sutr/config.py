@@ -46,6 +46,16 @@ class Settings(BaseSettings):
     # the registry additionally refuses it whenever is_cloud is set).
     deploy_docker_enabled: bool = True
 
+    # Observability. /metrics is off by default: it is an infrastructure
+    # endpoint, so it must be a deliberate choice to expose it. When enabled,
+    # setting METRICS_TOKEN additionally requires `Authorization: Bearer <token>`.
+    metrics_enabled: bool = False
+    metrics_token: str = ""
+    # Tracing needs the optional SDK: uv sync --extra otel
+    otel_enabled: bool = False
+    otel_service_name: str = "sutr"
+    otel_exporter_otlp_endpoint: str = ""
+
     # Secrets backend: "db" (default) or "db_kms".
     secrets_backend: str = "db"
     # AWS KMS options (only used when secrets_backend = "db_kms").

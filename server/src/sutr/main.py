@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import secrets
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -52,16 +54,20 @@ from sutr.api import (  # noqa: E402
     tool_settings,
     tools,
     totp,
+    usage,
     user_auth,
     users,
     workspaces,
 )
 from sutr.api import config as config_api  # noqa: E402
-from sutr.maintenance import maintenance_loop  # noqa: E402
+from sutr.maintenance import deployment_monitor_loop, maintenance_loop  # noqa: E402
 from sutr.mcp.asgi import mcp_asgi_app  # noqa: E402
 from sutr.mcp.oauth_provider import oauth_provider  # noqa: E402
 from sutr.mcp.refresh import tool_cache_refresh_loop  # noqa: E402
 from sutr.mcp.server import session_manager  # noqa: E402
+from sutr.observability.metrics import observe_http_request  # noqa: E402
+from sutr.observability.metrics import render as render_metrics  # noqa: E402
+from sutr.observability.tracing import configure_tracing  # noqa: E402
 from sutr.request_context import (  # noqa: E402
     get_request_id,
     new_request_id,
@@ -126,9 +132,11 @@ def check_database_schema() -> None:
 async def lifespan(app: FastAPI):
     validate_startup_settings()
     check_database_schema()
+    configure_tracing()
     tasks = [
         asyncio.create_task(tool_cache_refresh_loop()),
         asyncio.create_task(maintenance_loop()),
+        asyncio.create_task(deployment_monitor_loop()),
     ]
     try:
         async with session_manager.run():
@@ -266,6 +274,54 @@ class _MCPPathMiddleware:
 app.add_middleware(_MCPPathMiddleware)
 
 
+class _MetricsMiddleware:
+    """Record request counts and latency, labelled by matched route template.
+
+    Runs inside the router, so after `self.app(...)` returns, Starlette has
+    merged the matched route into the (mutable) scope. Unmatched paths collapse
+    to "other" and the SSE mount to "/mcp" — never raw paths, which would turn
+    ids into unbounded label values.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    @staticmethod
+    def _route_label(scope: Scope) -> str:
+        if scope.get("path", "").startswith("/mcp"):
+            return "/mcp"
+        route = scope.get("route")
+        path_format = getattr(route, "path_format", None) or getattr(route, "path", None)
+        return path_format or "other"
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        status_code = 500
+        started = time.perf_counter()
+
+        async def send_wrapper(message) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            observe_http_request(
+                scope.get("method", "GET"),
+                self._route_label(scope),
+                status_code,
+                time.perf_counter() - started,
+            )
+
+
+app.add_middleware(_MetricsMiddleware)
+
+
 class _ImmutableAssetStaticFiles(StaticFiles):
     async def get_response(self, path: str, scope: Scope) -> Response:
         response = await super().get_response(path, scope)
@@ -303,6 +359,7 @@ app.include_router(workspaces.router)
 app.include_router(tool_approvals.router)
 app.include_router(logs.router)
 app.include_router(audit.router)
+app.include_router(usage.router)
 app.include_router(oauth_server.router)
 
 # MCP SDK OAuth Authorization Server routes
@@ -326,6 +383,25 @@ for route in create_protected_resource_routes(
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics(request: Request) -> Response:
+    """Prometheus scrape endpoint.
+
+    Disabled by default (404, so its existence isn't advertised). When
+    METRICS_ENABLED=true and METRICS_TOKEN is set, a matching bearer token is
+    required. Series carry no tenant labels — see observability/metrics.py.
+    """
+    if not settings.metrics_enabled:
+        raise StarletteHTTPException(status_code=404, detail="Not Found")
+    if settings.metrics_token:
+        header = request.headers.get("authorization", "")
+        presented = header[7:] if header.lower().startswith("bearer ") else ""
+        if not secrets.compare_digest(presented, settings.metrics_token):
+            raise StarletteHTTPException(status_code=401, detail="Unauthorized")
+    body, content_type = render_metrics()
+    return Response(content=body, media_type=content_type)
 
 
 # ─── UI static file serving ───────────────────────────────────────────────────

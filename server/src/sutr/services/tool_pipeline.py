@@ -50,6 +50,9 @@ from sutr.mcp import oauth as oauth_refresh
 from sutr.models.integration import InstalledIntegration
 from sutr.models.log import LogEntry
 from sutr.models.oauth import OAuthState
+from sutr.observability.metrics import observe_tool_call, observe_tool_gated
+from sutr.observability.tracing import span
+from sutr.services.metering import record_tool_call
 from sutr.services.redaction import redact_args, redact_result
 
 logger = logging.getLogger(__name__)
@@ -172,6 +175,7 @@ def evaluate_gate(
                 "source": ctx.source,
             },
         )
+        observe_tool_gated(ctx.source, "denied")
         return GateResult(status="denied", args_hash=decision.args_hash)
 
     if not decision.allowed:
@@ -228,6 +232,7 @@ def evaluate_gate(
                     )
                 )
                 session.commit()
+            observe_tool_gated(ctx.source, "approval_pending")
             return GateResult(
                 status="approval_pending",
                 args_hash=decision.args_hash,
@@ -367,10 +372,25 @@ async def execute_tool(
         async def call(state):
             return await mcp_client.call_tool(installed, tool_name, arguments, state)
 
-    result, last_error = await _attempt_with_refresh(call, installed, oauth_state)
-    duration_ms = int((time.time() - start) * 1000)
+    with span(
+        "sutr.tool_call",
+        **{
+            "sutr.integration_id": integration_id,
+            "sutr.tool_name": tool_name,
+            "sutr.source": ctx.source,
+            "sutr.access_reason": gate.access_reason,
+            "sutr.transport": "http" if is_api else "mcp",
+        },
+    ) as active_span:
+        result, last_error = await _attempt_with_refresh(call, installed, oauth_state)
+        duration_ms = int((time.time() - start) * 1000)
+        outcome = "executed" if last_error is None else "error"
+        if active_span is not None:
+            active_span.set_attribute("sutr.outcome", outcome)
+            active_span.set_attribute("sutr.duration_ms", duration_ms)
+            if last_error is not None:
+                active_span.record_exception(last_error)
 
-    outcome = "executed" if last_error is None else "error"
     error_str = str(last_error) if last_error else None
     result_json = redact_result(result) if result and last_error is None else None
 
@@ -411,7 +431,18 @@ async def execute_tool(
                     additional_info=ctx.additional_info,
                 )
             )
+        # Metered in the same transaction as the log: an execution can never
+        # be logged without being metered, or metered without having run.
+        record_tool_call(
+            session,
+            ctx,
+            integration_id,
+            tool_name,
+            ExecutionOutcome(outcome=outcome, result={}, error=error_str, duration_ms=duration_ms),
+        )
         session.commit()
+
+    observe_tool_call(ctx.source, outcome, duration_ms)
 
     if last_error is not None:
         logger.warning("Tool call failed for %s/%s: %s", integration_id, tool_name, last_error)

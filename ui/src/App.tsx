@@ -15,6 +15,7 @@ const CustomApiBuilderPage = lazy(() => import('@/pages/CustomApiBuilderPage'))
 const CustomApiSetupPage = lazy(() => import('@/pages/CustomApiSetupPage'))
 const OpenApiImportPage = lazy(() => import('@/pages/OpenApiImportPage'))
 const DeploymentsPage = lazy(() => import('@/pages/DeploymentsPage'))
+const UsagePage = lazy(() => import('@/pages/UsagePage'))
 const DeveloperPage = lazy(() => import('@/pages/DeveloperPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
 const BillingPage = lazy(() => import('@/pages/BillingPage'))
@@ -72,6 +73,7 @@ export default function App() {
             />
             <Route path="/integrations/:integrationId" element={<ConnectionDetailPage />} />
             <Route path="/deployments" element={<DeploymentsPage />} />
+            <Route path="/usage" element={<UsagePage />} />
             <Route path="/connect" element={<DeveloperPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             {!isSelfHosted && <Route path="/settings/billing" element={<BillingPage />} />}

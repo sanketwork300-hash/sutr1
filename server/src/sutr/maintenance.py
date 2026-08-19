@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 
 MAINTENANCE_INTERVAL_SECONDS = 3600
 GOOGLE_LOGIN_STATE_TTL = timedelta(hours=1)
+# Deployment health/metering sampling cadence. Kept short enough that a stopped
+# container is noticed quickly, long enough not to spam the docker daemon.
+DEPLOYMENT_MONITOR_INTERVAL_SECONDS = 300
+DEPLOYMENT_SAMPLE_MINUTES = DEPLOYMENT_MONITOR_INTERVAL_SECONDS // 60
 
 
 def run_maintenance_sweep() -> dict[str, int]:
@@ -64,8 +68,9 @@ def run_maintenance_sweep() -> dict[str, int]:
             session.delete(row)
         counts["google_states_pruned"] = len(old_states)
 
-        # Per-org tool-call log retention. The audit trail (audit_event) is
-        # deliberately exempt — it is the durable record and is never pruned.
+        # Per-org tool-call log retention. The audit trail (audit_event) and the
+        # metering ledger (usage_event) are deliberately exempt — they are the
+        # durable compliance and billing records and are never pruned.
         retention_orgs = session.exec(
             select(Org).where(col(Org.log_retention_days).is_not(None))
         ).all()
@@ -94,3 +99,57 @@ async def maintenance_loop() -> None:
         except Exception:
             logger.exception("maintenance sweep failed")
         await asyncio.sleep(MAINTENANCE_INTERVAL_SECONDS)
+
+
+async def sweep_deployments() -> dict[str, int]:
+    """Reconcile deployment status with providers, meter runtime, set gauges.
+
+    Async (not run in a thread) because provider APIs are async. Each running
+    deployment observed by a sweep accrues DEPLOYMENT_SAMPLE_MINUTES of metered
+    runtime — sampling, so a crash between sweeps under-bills rather than
+    over-bills.
+    """
+    from sutr.models.deployment import Deployment
+    from sutr.observability.metrics import set_deployment_counts
+    from sutr.services.deployments import refresh_status
+    from sutr.services.metering import record_deployment_runtime
+
+    counts: dict[str, int] = {}
+    reconciled = 0
+    metered = 0
+
+    with Session(db.engine) as session:
+        deployments = session.exec(select(Deployment)).all()
+        for deployment in deployments:
+            previous = deployment.status
+            try:
+                deployment = await refresh_status(session, deployment)
+            except Exception:
+                logger.exception("deployment status refresh failed: %s", deployment.id)
+            if deployment.status != previous:
+                reconciled += 1
+                logger.info("deployment %s: %s -> %s", deployment.id, previous, deployment.status)
+            counts[deployment.status] = counts.get(deployment.status, 0) + 1
+            if deployment.status == "running":
+                record_deployment_runtime(
+                    session,
+                    org_id=deployment.org_id,
+                    deployment_id=deployment.id,
+                    minutes=DEPLOYMENT_SAMPLE_MINUTES,
+                )
+                metered += 1
+        session.commit()
+
+    set_deployment_counts(counts)
+    return {"reconciled": reconciled, "runtime_metered": metered, **counts}
+
+
+async def deployment_monitor_loop() -> None:
+    while True:
+        await asyncio.sleep(DEPLOYMENT_MONITOR_INTERVAL_SECONDS)
+        try:
+            result = await sweep_deployments()
+            if result.get("reconciled") or result.get("runtime_metered"):
+                logger.info("deployment sweep: %s", result)
+        except Exception:
+            logger.exception("deployment sweep failed")

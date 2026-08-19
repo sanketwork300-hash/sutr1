@@ -311,6 +311,19 @@ export interface Deployment {
   updated_at: string
 }
 
+export interface UsageSummary {
+  start: string
+  end: string
+  tool_calls: number
+  totals_by_kind: { kind: string; quantity: number; events: number }[]
+  tool_calls_by_outcome: { outcome: string | null; count: number }[]
+  tool_calls_by_source: { source: string | null; count: number }[]
+  top_integrations: { integration_id: string | null; count: number }[]
+  top_tools: { integration_id: string | null; tool_name: string | null; count: number }[]
+  daily: { date: string; count: number }[]
+  duration_ms: { avg: number | null; max: number | null }
+}
+
 export interface DeploymentProviderInfo {
   id: string
   display_name: string
@@ -767,6 +780,15 @@ export const api = {
     },
     remove(id: string) {
       return request<void>(`/openapi/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    },
+  },
+  usage: {
+    summary(params?: { start?: string; end?: string }) {
+      const qs = new URLSearchParams()
+      if (params?.start) qs.set('start', params.start)
+      if (params?.end) qs.set('end', params.end)
+      const suffix = qs.toString() ? `?${qs}` : ''
+      return request<UsageSummary>(`/usage/summary${suffix}`)
     },
   },
   deployments: {

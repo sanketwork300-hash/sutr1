@@ -24,6 +24,12 @@ docker compose -f docker-compose.prod.yml up -d
 | `OAUTH_CALLBACK_URL` | `https://${DOMAIN}/api/auth/callback` | Must exactly match the redirect URI registered in each OAuth app. |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | Optional. PostHog ingestion host for server-side analytics. Set `https://eu.i.posthog.com` for EU projects. |
 | `VITE_PUBLIC_POSTHOG_HOST` | `https://us.i.posthog.com` | Optional. PostHog ingestion host baked into the frontend bundle at build time. Set it to the same region as `POSTHOG_HOST`. |
+| `METRICS_ENABLED` | `false` | Exposes Prometheus metrics at `/metrics`. While off, the endpoint returns 404. |
+| `METRICS_TOKEN` | *(empty)* | When set (and metrics enabled), scrapers must send `Authorization: Bearer <token>`. Strongly recommended if `/metrics` is reachable beyond your private network. |
+| `OTEL_ENABLED` | `false` | Enables OpenTelemetry tracing. Requires the optional SDK: rebuild with `uv sync --extra otel`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | *(empty)* | OTLP/HTTP collector URL, e.g. `http://collector:4318/v1/traces`. Omit to record spans without exporting. |
+| `OTEL_SERVICE_NAME` | `sutr` | Service name reported on spans. |
+| `DEPLOY_DOCKER_ENABLED` | `true` | Allows the local Docker deployment provider. Set `false` to disable deployments entirely. |
 
 ## Backups
 

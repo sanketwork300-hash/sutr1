@@ -18,6 +18,7 @@ from sutr.models.org import Org
 from sutr.models.tool_approval_request import ToolApprovalRequest
 from sutr.models.tool_execution import ToolExecutionSetting
 from sutr.models.user import User
+from sutr.observability.metrics import observe_approval_decision
 from sutr.services.audit import record_audit
 
 router = APIRouter(prefix="/api/tool-approvals", tags=["tool-approvals"])
@@ -240,6 +241,7 @@ def _decide(
     session.commit()
     session.refresh(req)
     approval_events.notify_decision(request_id, req.status)
+    observe_approval_decision(decision_mode)
     posthog_client.capture(
         distinct_id=str(current_user.id),
         event=posthog_event,
@@ -383,6 +385,7 @@ def allow_tool(
     session.commit()
     session.refresh(req)
     approval_events.notify_decision(request_id, req.status)
+    observe_approval_decision("allow_tool_forever")
     posthog_client.capture(
         distinct_id=str(current_user.id),
         event="tool_approval_allowed_forever",

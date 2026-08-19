@@ -1,5 +1,14 @@
 import { Link, useLocation } from 'react-router-dom'
-import { CreditCard, FlaskConical, KeyRound, Puzzle, Rocket, Settings, X } from 'lucide-react'
+import {
+  BarChart3,
+  CreditCard,
+  FlaskConical,
+  KeyRound,
+  Puzzle,
+  Rocket,
+  Settings,
+  X,
+} from 'lucide-react'
 import { useThemeStore } from '../../stores/theme'
 import { useConfigStore } from '@/stores/config'
 
@@ -8,6 +17,7 @@ const navItems = [
   { to: '/deployments', label: 'Deployments', icon: Rocket },
   { to: '/connect', label: 'Connect', icon: KeyRound },
   { to: '/playground', label: 'Playground', icon: FlaskConical },
+  { to: '/usage', label: 'Usage', icon: BarChart3 },
 ]
 
 const billingItem = { to: '/settings/billing', label: 'Billing', icon: CreditCard }

@@ -801,6 +801,57 @@ Audit events are append-only and exempt from log retention. Tool-call logs (`/ap
 
 ---
 
+## Usage & metering
+
+Every tool execution is metered into a durable ledger (`usage_event`) in the same transaction as its log entry, so an execution can never be logged without being metered — or metered without having run. Calls stopped by policy (denied, or gated pending approval) consumed no upstream work and are **not** metered; they remain in the logs and audit trail. Deployment runtime accrues in 5-minute samples while a deployment is observed running. Retention never prunes this table.
+
+Both endpoints work with a session JWT **or** an API key (the CLI and SDKs use keys), and are org-scoped.
+
+### `GET /api/usage/summary?start=&end=`
+
+Defaults to the last 30 days; the window may not exceed 366 days. Timestamps may be offset-aware (e.g. `2026-08-19T12:00:00Z`) or naive UTC.
+
+```json
+{
+  "start": "2026-07-20T12:00:00", "end": "2026-08-19T12:00:00",
+  "tool_calls": 1284,
+  "totals_by_kind": [{"kind": "tool_call", "quantity": 1284, "events": 1284},
+                     {"kind": "deployment_runtime", "quantity": 8640, "events": 1728}],
+  "tool_calls_by_outcome": [{"outcome": "executed", "count": 1250}, {"outcome": "error", "count": 34}],
+  "tool_calls_by_source": [{"source": "mcp", "count": 900}, {"source": "api", "count": 384}],
+  "top_integrations": [{"integration_id": "posthog", "count": 512}],
+  "top_tools": [{"integration_id": "posthog", "tool_name": "create_annotation", "count": 300}],
+  "daily": [{"date": "2026-08-18", "count": 61}],
+  "duration_ms": {"avg": 284.3, "max": 4120}
+}
+```
+
+`deployment_runtime` quantity is **minutes**, not events.
+
+### `GET /api/usage/events?start=&end=&kind=&limit=&offset=`
+
+Raw metered events for export and reconciliation. Usage events carry counts and dimensions only — never arguments or results.
+
+CLI: `sutr usage summary [--days N]`, `sutr usage events [--kind ...]`.
+
+---
+
+## Metrics & tracing
+
+### `GET /metrics`
+
+Prometheus exposition. **Disabled by default** — set `METRICS_ENABLED=true`. When `METRICS_TOKEN` is also set, scrapers must send `Authorization: Bearer <token>`; while disabled the endpoint returns 404 rather than advertising itself.
+
+Series are process-level and aggregate: `sutr_tool_calls_total{source,outcome}`, `sutr_tool_call_duration_seconds`, `sutr_tool_calls_gated_total{source,reason}`, `sutr_approval_decisions_total{decision}`, `sutr_http_requests_total{method,route,status}`, `sutr_http_request_duration_seconds`, and `sutr_deployments{status}`.
+
+They deliberately carry **no org, integration, or tool labels** — that would explode cardinality and leak tenant identifiers to whoever scrapes the endpoint. Per-tenant numbers live in the usage ledger above. HTTP series are labelled with the matched route *template* (`/api/tools/{integration_id}/call`), never the raw path.
+
+### Tracing
+
+Optional OpenTelemetry export, off by default. Install the extra (`uv sync --extra otel`) and set `OTEL_ENABLED=true` plus `OTEL_EXPORTER_OTLP_ENDPOINT` (spans are recorded locally if the endpoint is omitted). Tool executions emit a `sutr.tool_call` span with integration, tool, source, access reason, outcome, and duration attributes — never arguments, results, or credentials, since traces leave the process.
+
+---
+
 ## Two-factor authentication (TOTP)
 
 When enabled, every approval decision (approve-once, allow-tool, deny) requires a fresh authenticator code from the approving user. The secret persists across disable/re-enable, so turning it back on does not require rescanning the QR.

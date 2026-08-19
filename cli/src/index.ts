@@ -5,6 +5,7 @@ import { integrationsCommand } from "./commands/integrations.js";
 import { openapiCommand } from "./commands/openapi.js";
 import { outputCommand } from "./commands/output.js";
 import { toolsCommand } from "./commands/tools.js";
+import { usageCommand } from "./commands/usage.js";
 
 declare const __VERSION__: string;
 
@@ -21,5 +22,6 @@ program.addCommand(integrationsCommand);
 program.addCommand(openapiCommand);
 program.addCommand(outputCommand);
 program.addCommand(toolsCommand);
+program.addCommand(usageCommand);
 
 program.parse();

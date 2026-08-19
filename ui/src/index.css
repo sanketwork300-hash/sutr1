@@ -46,6 +46,11 @@
   --badge-purple-text: #6d28d9;
   --badge-purple-dot: #a78bfa;
 
+  /* Chart marks. One hue per series slot; dark mode's step is chosen against
+     the dark surface (validated separately), never an automatic flip. */
+  --chart-1: #4f46e5;
+  --chart-1-soft: #e0e7ff;
+
   --code-bg: #f6f8fa;
   --code-text: #1f2328;
   --syn-comment: #6e7781;
@@ -122,6 +127,11 @@
   --badge-purple-bg: #6b21a8;
   --badge-purple-text: #f3e8ff;
   --badge-purple-dot: #d8b4fe;
+
+  /* Selected against the #1a1a1a dark surface — the light step (#4f46e5) and a
+     lighter #818cf8 both sit outside the dark lightness band. */
+  --chart-1: #6366f1;
+  --chart-1-soft: #312e81;
 
   --code-bg: #0d1117;
   --code-text: #e6edf3;

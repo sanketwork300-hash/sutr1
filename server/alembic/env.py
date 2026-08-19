@@ -28,6 +28,7 @@ from sutr.models.subscription import Subscription  # noqa: F401
 from sutr.models.tool_approval_request import ToolApprovalRequest  # noqa: F401
 from sutr.models.tool_cache import ToolCache  # noqa: F401
 from sutr.models.tool_execution import ToolExecutionSetting  # noqa: F401
+from sutr.models.usage_event import UsageEvent  # noqa: F401
 from sutr.models.user import User  # noqa: F401
 from sutr.models.waitlist import Waitlist  # noqa: F401
 from sutr.models.workspace import Workspace  # noqa: F401
