@@ -1,0 +1,46 @@
+# fly.toml app configuration file generated for agent-port on 2026-04-15T14:01:58-03:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'agent-port'
+primary_region = 'iad'
+
+[build]
+  [build.args]
+    IS_CLOUD = "true"
+    VITE_PUBLIC_POSTHOG_HOST = "https://d.agentport.sh"
+
+[deploy]
+  release_command = 'uv run alembic upgrade head'
+  strategy = "bluegreen"
+
+[env]
+  PORT = '4747'
+  BASE_URL = 'https://app.agentport.sh'
+  OAUTH_CALLBACK_URL = 'https://app.agentport.sh/api/auth/callback'
+  UI_BASE_URL = 'https://app.agentport.sh'
+  IS_CLOUD = 'true'
+  POSTHOG_HOST = 'https://d.agentport.sh'
+  # Fly's edge proxy is the sole ingress and sets X-Forwarded-For.
+  TRUST_PROXY_HEADERS = 'true'
+
+[http_service]
+  internal_port = 4747
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '15s'
+    method = 'GET'
+    path = '/health'
+
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 512
