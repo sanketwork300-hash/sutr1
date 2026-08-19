@@ -58,8 +58,18 @@ Codemod across 229 files + renames, per the naming-consistency directive. All ch
 - Deploy: compose services/images/volumes `sutr*`; default SQLite path `/data/sutr.db` with a guarded one-time `mv` from `/data/agent_port.db` in start.sh; fly.toml/install.sh/docs/Caddyfile renamed. README gains an "Upgrading from AgentPort" section + MIT attribution to upstream.
 - **Decisions documented:** DB tables were never brand-prefixed (`user`, `org`, …) so no table renames were needed (the spec's `agent_port_users → sutr_users` example doesn't apply); REST stays under `/api/*` — it carries no branding, and renaming 100+ stable routes consumed by UI/CLI/docs would break compatibility for zero branding gain (the `/api` namespace *is* the Sutr API namespace). GitHub org/domain placeholders used where the real ones don't exist yet: `github.com/sutr-dev/sutr`, `app.sutr.sh`, `docs.sutr.sh` — update when the real remote/domains are provisioned. LICENSE intentionally untouched (upstream MIT attribution).
 
-## Phase 4 — MCP (next)
-Registry/gateway verification is largely covered by existing tests + Phase 3; remaining: reduce REST/MCP duplication (moves into Phase 5 pipeline unification), per-call connection reuse (perf, optional).
+## Phase 4 — Canonical tool pipeline ✅ (2026-08-19)
+REST and MCP no longer carry separate copies of the execution pipeline. New `sutr/services/` layer:
+- `services/tool_pipeline.py` — the single implementation of policy evaluation, approval gating, upstream dispatch (OAuth pre-flight + one auth-error retry), logging, and analytics. Surfaces build a `CallContext` and translate `GateResult`/`ExecutionOutcome` into their own response shapes; `api/tools.py` and `mcp/server.py` are now thin translators (MCP's `_dispatch_and_log` deleted).
+- `services/tool_catalog.py` — TTL-cached tool discovery moved out of `api/tools.py`. The MCP management tools keep their serve-stale-refresh-in-background read strategy (deliberate latency tradeoff, documented, not drift).
+**Drift bugs fixed by unification** (each previously present on exactly one surface):
+- REST wrote gate logs with `outcome="approval_required"`, which the UI and `/api/logs` expiry decoration only recognize as `pending` → REST-gated calls rendered wrong. Canonical outcome is now `pending` on every surface; readers stay tolerant of legacy rows (`GATE_LOG_OUTCOMES`), api.md updated.
+- REST never recorded `requester_ip`/`user_agent` on logs or approval requests, never passed api-key metadata to `get_or_create_approval_request`, and never set `access_reason="approved_once"` on consumed approvals.
+- MCP never recorded `duration_ms` and emitted no analytics; both surfaces now emit `tool_called`/`tool_call_denied_by_policy` with a `source` property (`api`/`mcp`).
+- `result_json` is stored only on success (REST's expression already behaved this way by accident; now explicit).
+- PostHog client is disabled when no project token is configured (self-hosted default) — the background consumer used to 401 on every flush.
+Tests: `tests/test_services/test_tool_pipeline.py` (9 — gate semantics, in-place gate-log resolution, duration/metadata, REST regression for the outcome drift). MCP test fixtures now also patch `sutr.db.engine` (the pipeline resolves the engine lazily via `sutr.db`). Suite: **608 green**; live boot smoke-checked.
+Remaining (deferred to Phase 5 governance): per-call upstream connection reuse (perf), decision-row locking, log redaction/retention.
 
 ## Phases 5–14 — pending
 Governance (unify REST/MCP pipeline, log redaction, audit trail, exact-args-forever, decision-row locking) · OpenAPI compiler (§17–27) · HTTP runtime · generated servers · deployment providers (K8s/Argo/Swaraj) · observability & metering · SDK/CLI · frontend completion · security hardening · E2E validation.

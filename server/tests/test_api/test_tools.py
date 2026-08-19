@@ -118,7 +118,7 @@ async def test_list_tools_waits_for_in_progress_refresh(client, session, test_or
         return waited_tools
 
     monkeypatch.setattr(
-        "sutr.api.tools._wait_for_in_progress_refresh",
+        "sutr.services.tool_catalog.wait_for_in_progress_refresh",
         fake_wait_for_in_progress_refresh,
     )
 

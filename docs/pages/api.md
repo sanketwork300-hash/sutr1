@@ -751,7 +751,7 @@ Query tool call logs for your org.
 ]
 ```
 
-The `outcome` field can be: `executed`, `approval_required`, `denied`, or `error`.
+The `outcome` field can be: `executed`, `pending` (awaiting human approval), `approved` (decided, not yet executed), `denied`, or `error`. Rows written by older versions may carry `approval_required`, the legacy spelling of `pending`.
 
 `additional_info` carries the agent's optional explanation for the call (if any was supplied).
 

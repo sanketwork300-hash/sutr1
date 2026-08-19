@@ -67,6 +67,8 @@ def mcp_env_fixture(monkeypatch):
     detached_org = Org(id=org_id, name="test")
 
     monkeypatch.setattr("sutr.mcp.server.engine", engine)
+    # The shared pipeline resolves the engine lazily through sutr.db.
+    monkeypatch.setattr("sutr.db.engine", engine)
     token = _current_auth.set(_FakeAuth(org=detached_org))
     try:
         yield engine, detached_org
@@ -86,7 +88,7 @@ async def test_execute_upstream_tool_strips_additional_info(mcp_env):
         captured["args"] = args
         return {"content": [{"type": "text", "text": "ok"}]}
 
-    with patch("sutr.mcp.server.mcp_client.call_tool", side_effect=fake_call_tool):
+    with patch("sutr.mcp.client.call_tool", side_effect=fake_call_tool):
         await execute_upstream_tool(
             "posthog",
             "create_annotation",
@@ -119,7 +121,7 @@ async def test_execute_upstream_tool_without_additional_info(mcp_env):
     engine, org = mcp_env
 
     fake = AsyncMock(return_value={"content": [{"type": "text", "text": "ok"}]})
-    with patch("sutr.mcp.server.mcp_client.call_tool", side_effect=fake):
+    with patch("sutr.mcp.client.call_tool", side_effect=fake):
         await execute_upstream_tool("posthog", "create_annotation", {"content": "hello"})
 
     with Session(engine) as session:
@@ -142,7 +144,7 @@ async def test_execute_upstream_tool_ignores_non_string_additional_info(mcp_env)
         captured["args"] = args
         return {"content": [{"type": "text", "text": "ok"}]}
 
-    with patch("sutr.mcp.server.mcp_client.call_tool", side_effect=fake_call_tool):
+    with patch("sutr.mcp.client.call_tool", side_effect=fake_call_tool):
         await execute_upstream_tool(
             "posthog",
             "create_annotation",
@@ -188,6 +190,8 @@ def approval_env_fixture(monkeypatch):
     detached_org = Org(id=org_id, name="test")
 
     monkeypatch.setattr("sutr.mcp.server.engine", engine)
+    # The shared pipeline resolves the engine lazily through sutr.db.
+    monkeypatch.setattr("sutr.db.engine", engine)
     token = _current_auth.set(_FakeAuth(org=detached_org))
 
     # Isolate events module state so tests don't bleed into one another.
@@ -257,7 +261,7 @@ async def test_await_approval_wakes_on_approve_and_executes(approval_env):
     async def fake_upstream(installed, tool_name, args, oauth_state):
         return {"content": [{"type": "text", "text": "executed-ok"}]}
 
-    with patch("sutr.mcp.server.mcp_client.call_tool", side_effect=fake_upstream):
+    with patch("sutr.mcp.client.call_tool", side_effect=fake_upstream):
         approver_task = asyncio.create_task(approver())
         result = await await_approval(request_id)
         await approver_task
@@ -343,7 +347,7 @@ async def test_await_approval_short_circuits_when_already_approved(approval_env)
     async def fake_upstream(installed, tool_name, args, oauth_state):
         return {"content": [{"type": "text", "text": "recovered-ok"}]}
 
-    with patch("sutr.mcp.server.mcp_client.call_tool", side_effect=fake_upstream):
+    with patch("sutr.mcp.client.call_tool", side_effect=fake_upstream):
         result = await asyncio.wait_for(await_approval(request_id), timeout=2.0)
 
     assert result[0].text == "recovered-ok"

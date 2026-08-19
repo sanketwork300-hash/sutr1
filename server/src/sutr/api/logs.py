@@ -36,11 +36,13 @@ def list_logs(
     stmt = stmt.offset(offset).limit(limit)
     logs = session.exec(stmt).all()
 
-    # Attach approval_expires_at for pending entries so the frontend can detect expiry
+    # Attach approval_expires_at for pending entries so the frontend can detect
+    # expiry. "approval_required" is the pre-unification REST spelling of
+    # "pending" — old rows keep it, new writes never produce it.
     pending_ids = [
         log.approval_request_id
         for log in logs
-        if log.outcome == "pending" and log.approval_request_id is not None
+        if log.outcome in ("pending", "approval_required") and log.approval_request_id is not None
     ]
     expires_map: dict = {}
     if pending_ids:
