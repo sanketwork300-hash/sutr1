@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, ArrowRight, FileJson, Globe, KeyRound, Loader2 } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Download, FileJson, Globe, KeyRound, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   api,
@@ -37,6 +37,7 @@ export default function OpenApiImportPage() {
   const [preview, setPreview] = useState<OpenApiCompileResult | null>(null)
   const [compiling, setCompiling] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [downloading, setDownloading] = useState(false)
   const [compileError, setCompileError] = useState('')
 
   const selectedServer = useMemo(() => {
@@ -146,6 +147,27 @@ export default function OpenApiImportPage() {
     } catch (err) {
       setCompileError(err instanceof Error ? err.message : 'Failed to create the integration')
       setCreating(false)
+    }
+  }
+
+  async function handleDownloadPackage() {
+    if (!project) return
+    setCompileError('')
+    setDownloading(true)
+    try {
+      const { blob, filename } = await api.openapi.downloadPackage(project.id, compileBody(false))
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = filename ?? 'mcp-server.zip'
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setCompileError(err instanceof Error ? err.message : 'Failed to generate the package')
+    } finally {
+      setDownloading(false)
     }
   }
 
@@ -558,15 +580,33 @@ export default function OpenApiImportPage() {
               <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
                 You'll connect credentials on the next screen.
               </span>
-              <Button type="button" size="sm" onClick={handleCreate} disabled={creating}>
-                {creating ? (
-                  <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
-                ) : (
-                  <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                    Create integration <ArrowRight size={13} style={{ marginLeft: 6 }} />
-                  </span>
-                )}
-              </Button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={handleDownloadPackage}
+                  disabled={downloading || creating}
+                  title="Self-contained MCP server (Python + Dockerfile) you can run anywhere"
+                >
+                  {downloading ? (
+                    <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
+                  ) : (
+                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                      <Download size={13} style={{ marginRight: 6 }} /> Server package
+                    </span>
+                  )}
+                </Button>
+                <Button type="button" size="sm" onClick={handleCreate} disabled={creating}>
+                  {creating ? (
+                    <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
+                  ) : (
+                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                      Create integration <ArrowRight size={13} style={{ marginLeft: 6 }} />
+                    </span>
+                  )}
+                </Button>
+              </div>
             </footer>
           </section>
         )}

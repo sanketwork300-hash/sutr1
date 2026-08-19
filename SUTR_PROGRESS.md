@@ -94,5 +94,18 @@ Completed the OpenAPI subsystem from compiler core (Phase 3.5) to a working prod
 - Suite: **627 green**; UI tsc+vite+eslint green; CLI tsc+build green.
 - Deferred to later phases: standalone generated MCP server packaging (§28–31), OpenAPI project audit events, upload-file UI affordance (paste covers it), CustomApiBuilderPage regeneration hints.
 
-## Phases 7–14 — pending
+## Phase 7 — Generated standalone MCP servers ✅ (2026-08-19)
+Sutr spec §28–31: any compiled OpenAPI project can be exported as a self-contained MCP server package with no Sutr dependency.
+- **Generator** (`openapi/packaging.py`): zip with `server.py` (MCP stdio server + `--list-tools`), `sutr_runtime.py` (request building/execution mirroring `api_client` semantics exactly — path quoting, query/header wire names, `body_param` wrapping, auth header merged over param headers), `tools.json` (compiled ApiTools + auth config — pure data), **generated offline tests** (`test_server.py`: bundle shape, schemas, request building for every tool, path-param URL-encoding, args-cannot-override-auth-header), `Dockerfile`, `pyproject.toml`/`requirements.txt` (mcp + httpx), README with Claude Desktop/Code config + Docker instructions, `.env.example`. Injection-safe by construction: templates are static text, all API-specific content lives in `tools.json`. Byte-deterministic output (fixed zip timestamps). Credentials only via a slug-derived env var.
+- **Endpoint** `POST /api/openapi/{id}/package` (same body as /compile), `integrations:manage`, audited (`openapi.package_generated`). Deliberate decision, documented: the package base URL is NOT SSRF-screened — packages run on the user's own infrastructure where private-network APIs are legitimate.
+- **CLI** `sutr openapi package <id> [--out] [filter/server/auth flags]`; **UI** "Server package" download button on the wizard's preview step (`requestBlob` helper in the client).
+- Tests (`test_openapi/test_packaging.py`, 11): content/determinism/no-auth variant/empty-refusal/slug sanitization; generated runtime imported and verified directly; **subprocess proofs** — generated `server.py --list-tools` runs, generated pytest suite passes; endpoint zip + audit + viewer 403.
+- **Live E2E smoke** (Sutr on :4750, real upstream echo API on :4777): CLI api-key auth → `sutr openapi import --file` → `sutr openapi package` (14 KB zip) → extract → generated tests pass → `--list-tools` → **generated runtime executed real HTTP calls against the live upstream** (auth header delivered, query param passed, POST body echoed). User's real CLI config backed up/restored around the test.
+- Suite: **638 green**; UI + CLI builds green.
+- Deferred: streamable-HTTP transport option for generated servers, docker build verification in CI (needs a runner with Docker), deployment providers → Phase 8.
+
+## Phase 8 — Deployment providers (next)
+Kubernetes/Argo CD/Swaraj Cloud deployment of generated servers (§32–38). Needs real targets: ask the user which are available (cluster credentials, registry) before scoping.
+
+## Phases 9–14 — pending
 Governance (unify REST/MCP pipeline, log redaction, audit trail, exact-args-forever, decision-row locking) · OpenAPI compiler (§17–27) · HTTP runtime · generated servers · deployment providers (K8s/Argo/Swaraj) · observability & metering · SDK/CLI · frontend completion · security hardening · E2E validation.

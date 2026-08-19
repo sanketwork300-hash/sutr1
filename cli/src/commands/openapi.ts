@@ -1,6 +1,7 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { Command } from "commander";
-import { request } from "../client.js";
+import { buildHeaders, request } from "../client.js";
+import { readConfig } from "../config.js";
 import { print, printError, resolveFormat } from "../output.js";
 
 export const openapiCommand = new Command("openapi").description(
@@ -221,6 +222,82 @@ openapiCommand
             );
           }
         }
+      } catch (e) {
+        printError((e as Error).message, 1);
+      }
+    },
+  );
+
+openapiCommand
+  .command("package <project_id>")
+  .description("Download a standalone MCP server package (zip) for a project")
+  .option("--out <path>", "Where to write the zip (defaults to the server-suggested name)")
+  .option("--include-tags <tags>", "Only include operations with these tags (comma-separated)")
+  .option("--exclude-tags <tags>", "Exclude operations with these tags (comma-separated)")
+  .option("--exclude-paths <paths>", "Exclude these paths (comma-separated, * suffix wildcard)")
+  .option("--include-deprecated", "Include operations marked deprecated")
+  .option("--server-url <url>", "Base URL override")
+  .option("--name <name>", "Package name (defaults to the project name)")
+  .option("--auth-header <header>", "Auth header name override")
+  .option("--auth-format <format>", "Auth format override, e.g. 'Bearer {token}'")
+  .action(
+    async (
+      projectId: string,
+      opts: {
+        out?: string;
+        includeTags?: string;
+        excludeTags?: string;
+        excludePaths?: string;
+        includeDeprecated?: boolean;
+        serverUrl?: string;
+        name?: string;
+        authHeader?: string;
+        authFormat?: string;
+      },
+    ) => {
+      try {
+        const body: Record<string, unknown> = {
+          filters: {
+            include_tags: splitList(opts.includeTags),
+            exclude_tags: splitList(opts.excludeTags),
+            exclude_paths: splitList(opts.excludePaths),
+            include_deprecated: opts.includeDeprecated ?? false,
+          },
+          server_url: opts.serverUrl,
+          integration_name: opts.name,
+        };
+        if (opts.authHeader !== undefined || opts.authFormat !== undefined) {
+          body.auth = {
+            token_header: opts.authHeader ?? "",
+            token_format: opts.authFormat ?? "",
+          };
+        }
+
+        const config = readConfig();
+        const baseUrl = config.url.replace(/\/+$/, "");
+        const res = await fetch(
+          `${baseUrl}/api/openapi/${encodeURIComponent(projectId)}/package`,
+          {
+            method: "POST",
+            headers: buildHeaders(config, true),
+            body: JSON.stringify(body),
+          },
+        );
+        if (!res.ok) {
+          const json = (await res.json().catch(() => ({}))) as { detail?: unknown };
+          printError(
+            typeof json.detail === "string"
+              ? json.detail
+              : `HTTP ${res.status}: ${res.statusText}`,
+            1,
+          );
+        }
+        const disposition = res.headers.get("content-disposition") ?? "";
+        const suggested = /filename="([^"]+)"/.exec(disposition)?.[1] ?? "mcp-server.zip";
+        const outPath = opts.out ?? suggested;
+        writeFileSync(outPath, Buffer.from(await res.arrayBuffer()));
+        console.log(`Wrote ${outPath}`);
+        console.log("Unzip it, then: pip install -r requirements.txt && python server.py");
       } catch (e) {
         printError((e as Error).message, 1);
       }

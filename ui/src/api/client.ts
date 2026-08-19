@@ -76,6 +76,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json()
 }
 
+async function requestBlob(
+  path: string,
+  init?: RequestInit,
+): Promise<{ blob: Blob; filename: string | null }> {
+  const token = getToken()
+  const headers = new Headers(init?.headers)
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+  const res = await fetch(`/api${path}`, { ...init, headers })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new ApiError(res.status, body, getErrorMessage(body, res.status))
+  }
+  const disposition = res.headers.get('content-disposition') ?? ''
+  const match = disposition.match(/filename="([^"]+)"/)
+  return { blob: await res.blob(), filename: match ? match[1] : null }
+}
+
 // ── Types ──
 
 export interface AuthMethod {
@@ -701,6 +723,12 @@ export const api = {
     },
     compile(id: string, data: OpenApiCompileRequest) {
       return request<OpenApiCompileResult>(`/openapi/${encodeURIComponent(id)}/compile`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      })
+    },
+    downloadPackage(id: string, data: OpenApiCompileRequest) {
+      return requestBlob(`/openapi/${encodeURIComponent(id)}/package`, {
         method: 'POST',
         body: JSON.stringify(data),
       })

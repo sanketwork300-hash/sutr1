@@ -380,11 +380,17 @@ Compile the project into tools. Requires `integrations:manage`.
 
 With `dry_run: true` the response previews the exact tools (deterministic names from `operationId`, documented collision handling), warnings, resolved base URL, and auth — nothing is created. Without it, a custom API integration is created (or updated in place on recompile) and appears in the catalog; connect and set per-tool approval policies as usual. The base URL is SSRF-validated at compile time and again on every call.
 
+### `POST /api/openapi/{project_id}/package`
+
+Generate a **standalone MCP server package** (zip) for the project. Accepts the same body as `/compile` (`dry_run` is ignored). Requires `integrations:manage`.
+
+The zip is a self-contained Python project with no Sutr dependency: `server.py` (MCP stdio server), `sutr_runtime.py` (request building/execution mirroring the gateway's semantics), `tools.json` (the compiled tool definitions — pure data), generated offline tests (`test_server.py`), `Dockerfile`, `README.md`, and `.env.example`. Credentials are read only from an environment variable named in the bundle; agent-supplied headers can never override the credential header. The base URL is deliberately **not** SSRF-screened for packages — they run on your own infrastructure, where private-network APIs are legitimate targets. Output is byte-deterministic; each generation is recorded in the audit trail.
+
 ### `DELETE /api/openapi/{project_id}`
 
 Delete the import artifact. A compiled integration lives on and is managed through the custom-API endpoints.
 
-CLI equivalents: `sutr openapi import|list|show|compile|delete`.
+CLI equivalents: `sutr openapi import|list|show|compile|package|delete`.
 
 ---
 

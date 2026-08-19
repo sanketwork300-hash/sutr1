@@ -25,7 +25,7 @@ interface RequestOptions {
   params?: Record<string, string>;
 }
 
-function buildHeaders(config: Config, hasBody: boolean): Record<string, string> {
+export function buildHeaders(config: Config, hasBody: boolean): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: "application/json",
   };

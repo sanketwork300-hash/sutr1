@@ -9,7 +9,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
@@ -39,6 +39,8 @@ from sutr.openapi import (
     substitute_server_url,
     translate_security,
 )
+from sutr.openapi.packaging import build_server_package
+from sutr.services.audit import actor_from_agent_auth, record_audit
 from sutr.token_auth import validate_token_auth_config
 
 router = APIRouter(prefix="/api/openapi", tags=["openapi"])
@@ -76,6 +78,50 @@ class CompileRequest(BaseModel):
 
 def _definition(project: OpenAPIProject) -> ApiDefinition:
     return ApiDefinition.model_validate_json(project.ir_json)
+
+
+def _resolve_compilation(project: OpenAPIProject, body: "CompileRequest"):
+    """Shared front half of compile and package: base URL, tools, auth.
+
+    Returns (definition, base_url, compile_result, auth, warnings). Raises
+    HTTPException on invalid input.
+    """
+    definition = _definition(project)
+
+    # Resolve the base URL: explicit choice, else the spec's first server.
+    try:
+        if body.server_url:
+            base_url = body.server_url
+            for server in definition.servers:
+                if server.url == body.server_url:
+                    base_url = substitute_server_url(server, body.server_variables)
+                    break
+        elif definition.servers:
+            base_url = substitute_server_url(definition.servers[0], body.server_variables)
+        else:
+            raise OpenAPIError(
+                "no_server",
+                "The specification declares no servers — provide server_url explicitly.",
+            )
+        result = compile_definition(definition, body.filters)
+    except OpenAPIError as exc:
+        raise _http_error(exc)
+
+    # Auth: explicit config wins; otherwise the translated spec security.
+    translated = translate_security(definition)
+    auth = body.auth or AuthConfig(
+        token_header=translated.token_header, token_format=translated.token_format
+    )
+    if auth.token_header or auth.token_format:
+        try:
+            validate_token_auth_config(auth.token_header, auth.token_format)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    warnings = [w.model_dump() for w in result.warnings] + [
+        w.model_dump() for w in translated.warnings
+    ]
+    return definition, base_url, result, auth, warnings
 
 
 def _operation_summary(definition: ApiDefinition) -> list[dict]:
@@ -216,41 +262,7 @@ def compile_project(
     if project is None or project.org_id != agent_auth.org.id:
         raise HTTPException(status_code=404, detail="OpenAPI project not found")
 
-    definition = _definition(project)
-
-    # Resolve the base URL: explicit choice, else the spec's first server.
-    try:
-        if body.server_url:
-            base_url = body.server_url
-            for server in definition.servers:
-                if server.url == body.server_url:
-                    base_url = substitute_server_url(server, body.server_variables)
-                    break
-        elif definition.servers:
-            base_url = substitute_server_url(definition.servers[0], body.server_variables)
-        else:
-            raise OpenAPIError(
-                "no_server",
-                "The specification declares no servers — provide server_url explicitly.",
-            )
-        result = compile_definition(definition, body.filters)
-    except OpenAPIError as exc:
-        raise _http_error(exc)
-
-    # Auth: explicit config wins; otherwise the translated spec security.
-    translated = translate_security(definition)
-    auth = body.auth or AuthConfig(
-        token_header=translated.token_header, token_format=translated.token_format
-    )
-    if auth.token_header or auth.token_format:
-        try:
-            validate_token_auth_config(auth.token_header, auth.token_format)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-
-    warnings = [w.model_dump() for w in result.warnings] + [
-        w.model_dump() for w in translated.warnings
-    ]
+    definition, base_url, result, auth, warnings = _resolve_compilation(project, body)
     tools = [ct.tool for ct in result.tools]
     preview = {
         "tools": [
@@ -339,6 +351,65 @@ def compile_project(
         "integration_id": integration.integration_id,
         "project": _serialize_project(project),
     }
+
+
+@router.post("/{project_id}/package")
+def package_project(
+    project_id: uuid.UUID,
+    body: CompileRequest,
+    session: Session = Depends(get_session),
+    agent_auth: AgentAuth = Depends(get_agent_auth),
+) -> Response:
+    """Generate a standalone MCP server package (zip) for this project.
+
+    Accepts the same body as /compile (filters, server, auth, name);
+    `dry_run` is ignored. Nothing is created server-side beyond an audit
+    event — the package runs entirely on the user's own infrastructure, so
+    the base URL is deliberately NOT SSRF-screened here (a private-network
+    API is a legitimate target for a self-hosted server).
+    """
+    ensure_agent_can(session, agent_auth, "integrations:manage")
+    project = session.get(OpenAPIProject, project_id)
+    if project is None or project.org_id != agent_auth.org.id:
+        raise HTTPException(status_code=404, detail="OpenAPI project not found")
+
+    definition, base_url, result, auth, _warnings = _resolve_compilation(project, body)
+
+    try:
+        filename, data = build_server_package(
+            name=body.integration_name or project.name,
+            base_url=base_url,
+            token_header=auth.token_header,
+            token_format=auth.token_format,
+            tools=[ct.tool for ct in result.tools],
+            api_title=definition.title,
+            api_version=definition.version,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    record_audit(
+        session,
+        org_id=agent_auth.org.id,
+        action="openapi.package_generated",
+        summary=f"Standalone MCP server package generated for '{project.name}'",
+        target_type="openapi_project",
+        target_id=str(project.id),
+        metadata={"tool_count": len(result.tools), "filename": filename},
+        **actor_from_agent_auth(agent_auth),
+    )
+    session.commit()
+
+    posthog_client.capture(
+        distinct_id=str(agent_auth.org.id),
+        event="openapi_package_generated",
+        properties={"tool_count": len(result.tools)},
+    )
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.delete("/{project_id}", status_code=204)
