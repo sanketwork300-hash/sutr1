@@ -56,6 +56,13 @@ async def test_unhandled_exception_returns_500_with_request_id():
     async def _boom():
         raise RuntimeError("boom")
 
+    # When server/ui_dist exists (a packaged build, or a local single-port run)
+    # main.py has already registered the SPA catch-all, and Starlette matches
+    # routes in registration order — so a route appended now would be shadowed
+    # and answered with index.html. Move ours to the front so this test asserts
+    # the exception handler in both layouts.
+    app.router.routes.insert(0, app.router.routes.pop())
+
     try:
         transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as client:

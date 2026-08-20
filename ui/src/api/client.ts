@@ -220,6 +220,14 @@ export interface OpenApiOperationSummary {
   deprecated: boolean
 }
 
+export interface OpenApiSecurityScheme {
+  name?: string
+  type?: string
+  scheme?: string | null
+  location?: string | null
+  header_name?: string | null
+}
+
 export interface OpenApiServer {
   url: string
   description?: string | null
@@ -243,18 +251,43 @@ export interface OpenApiProject {
   // Detail-only fields:
   description?: string | null
   servers?: OpenApiServer[]
+  security_schemes?: OpenApiSecurityScheme[]
   suggested_auth?: { token_header: string; token_format: string; warnings: OpenApiWarning[] }
   operations?: OpenApiOperationSummary[]
   tags?: string[]
+  provenance?: Record<string, unknown>
   server_url?: string | null
   server_variables?: Record<string, string>
 }
 
+export type OpenApiSourceKind = 'paste' | 'upload' | 'url' | 'github' | 'swaggerhub'
+
 export interface OpenApiImportRequest {
   name?: string
-  source_kind: 'paste' | 'upload' | 'url'
+  source_kind: OpenApiSourceKind
   content?: string
   url?: string
+  /** GitHub: choose one file when the repo has several. Omit to auto-discover. */
+  path?: string
+  /** Private-source credentials. Used for this request only; never stored. */
+  github_token?: string
+  swaggerhub_api_key?: string
+  /** Ask SwaggerHub to inline external $refs before sending the document. */
+  resolved?: boolean
+}
+
+export interface OpenApiSpecCandidate {
+  path: string
+  filename: string
+  size: number | null
+}
+
+export interface OpenApiDiscoverResult {
+  source_kind: string
+  owner: string
+  repo: string
+  branch: string
+  candidates: OpenApiSpecCandidate[]
 }
 
 export interface OpenApiCompileRequest {
@@ -263,6 +296,8 @@ export interface OpenApiCompileRequest {
     exclude_tags?: string[]
     include_paths?: string[]
     exclude_paths?: string[]
+    include_operations?: string[]
+    exclude_operations?: string[]
     include_deprecated?: boolean
   }
   server_url?: string
@@ -776,6 +811,12 @@ export const api = {
     },
     import(data: OpenApiImportRequest) {
       return request<OpenApiProject>('/openapi/import', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      })
+    },
+    discover(data: { url: string; github_token?: string }) {
+      return request<OpenApiDiscoverResult>('/openapi/discover', {
         method: 'POST',
         body: JSON.stringify(data),
       })

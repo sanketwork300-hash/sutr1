@@ -40,12 +40,17 @@ def parse_spec_text(text: str) -> dict:
     return data
 
 
-async def fetch_spec_from_url(url: str) -> str:
+async def fetch_spec_from_url(url: str, headers: dict[str, str] | None = None) -> str:
     """Fetch a spec over HTTP with SSRF screening and a size cap.
 
     The URL is untrusted user input: loopback/private/link-local targets are
     rejected, redirects are not followed (a redirect could bounce to an
-    internal address), and the body is streamed with a hard byte limit.
+    internal address, and would also carry any credential in `headers` there),
+    and the body is streamed with a hard byte limit.
+
+    `headers` carries source-specific credentials (a GitHub token, a SwaggerHub
+    API key). Callers must only pass them for URLs they have already pinned to
+    that provider's host — see `openapi/sources.py`.
     """
     try:
         validate_safe_url(url)
@@ -56,7 +61,7 @@ async def fetch_spec_from_url(url: str) -> str:
         async with httpx.AsyncClient(
             timeout=URL_FETCH_TIMEOUT_SECONDS, follow_redirects=False
         ) as client:
-            async with client.stream("GET", url) as response:
+            async with client.stream("GET", url, headers=headers) as response:
                 if response.status_code >= 400:
                     raise OpenAPIError(
                         "fetch_failed",

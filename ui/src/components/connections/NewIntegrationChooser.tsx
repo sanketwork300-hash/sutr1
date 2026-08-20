@@ -1,15 +1,20 @@
-import { Code, FileJson, Plug } from 'lucide-react'
+import { FileJson, Plug } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 interface Props {
   open: boolean
   onClose: () => void
   onPickMcp: () => void
-  onPickApi: () => void
   onPickOpenApi: () => void
 }
 
-export function NewIntegrationChooser({ open, onClose, onPickMcp, onPickApi, onPickOpenApi }: Props) {
+/**
+ * Two ways in, deliberately. The hand-rolled "Custom API" builder was removed:
+ * the OpenAPI path produces the same CustomApiIntegration rows but derives the
+ * paths, parameters, and auth from a specification instead of asking the user to
+ * retype them, so it is strictly better for the same job.
+ */
+export function NewIntegrationChooser({ open, onClose, onPickMcp, onPickOpenApi }: Props) {
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="sm:max-w-[520px]">
@@ -23,14 +28,14 @@ export function NewIntegrationChooser({ open, onClose, onPickMcp, onPickApi, onP
               lineHeight: 1.5,
             }}
           >
-            Choose what you're connecting.
+            Connect an existing MCP server, or build tools from an API specification.
           </p>
         </DialogHeader>
 
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: '1fr 1fr 1fr',
+            gridTemplateColumns: '1fr 1fr',
             gap: 10,
             paddingTop: 4,
           }}
@@ -38,19 +43,13 @@ export function NewIntegrationChooser({ open, onClose, onPickMcp, onPickApi, onP
           <ChoiceCard
             icon={<Plug size={18} />}
             label="MCP server"
-            hint="Add a remote MCP endpoint by URL."
+            hint="Connect a remote MCP endpoint by URL."
             onClick={onPickMcp}
           />
           <ChoiceCard
-            icon={<Code size={18} />}
-            label="Custom API"
-            hint="Wrap a REST endpoint as agent tools."
-            onClick={onPickApi}
-          />
-          <ChoiceCard
             icon={<FileJson size={18} />}
-            label="OpenAPI spec"
-            hint="Compile an OpenAPI document into tools."
+            label="Build from an API"
+            hint="Import an OpenAPI spec from GitHub, SwaggerHub, or a URL and compile it into tools."
             onClick={onPickOpenApi}
           />
         </div>

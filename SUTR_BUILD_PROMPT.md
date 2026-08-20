@@ -28,8 +28,8 @@ at all times:
    SDK already in `server/pyproject.toml` and the MCP specification repo. For OpenAPI semantics,
    consult the OpenAPI 3.0/3.1 spec and the existing `server/src/sutr/openapi/` implementation.
 6. **Database changes only via Alembic migrations** (`server/alembic/`), continuing the numbered
-   sequence (currently at `0024`). Never edit an applied migration. SQLite and PostgreSQL must
-   both work — `DATABASE_URL` is the only difference (hard architectural rule).
+   sequence (head is `0028_security_hardening.py`). Never edit an applied migration. SQLite and
+   PostgreSQL must both work — `DATABASE_URL` is the only difference (hard architectural rule).
 7. **When a spec in this document conflicts with the code, the code wins for existing behavior
    and this document wins for new behavior.** Log every such conflict in `SUTR_PROGRESS.md`
    instead of silently choosing.
@@ -79,10 +79,16 @@ ui/src/           ← pages/, components/, api/, stores/, analytics/
 docs/pages/       ← teeny static site; update in the same commit as any API/model change
 ```
 
+Also present, added after the original layout: `server/src/sutr/services/` (the shared service
+layer: `tool_pipeline.py`, `audit.py`, `metering.py`, `redaction.py`, `tool_catalog.py`,
+`deployments.py`), `server/src/sutr/observability/` (`metrics.py`, `tracing.py`),
+`server/src/sutr/deploy/` (`base.py`, `docker_provider.py`, `registry.py`),
+`server/src/sutr/openapi/sources.py` + `packaging.py`, and `sdk/python/` + `sdk/typescript/`.
+
 **Verification gate — run after every phase, all must pass:**
 
 ```bash
-cd server && uv run ruff format && uv run ruff check . && uv run pytest -q   # 599 green today
+cd server && uv run ruff format && uv run ruff check . && uv run pytest -q   # 732 green today
 cd ui && pnpm exec tsc -b && pnpm exec vite build
 cd cli && pnpm exec tsc --noEmit
 ```
@@ -90,28 +96,91 @@ cd cli && pnpm exec tsc --noEmit
 Plus a live smoke test: boot the server; `/health` 200, `/api/config` 200, `/mcp` returns 401
 with the RFC 9728 `WWW-Authenticate` header (`resource_name: "Sutr MCP"`).
 
-## 3. Current implementation status (verified 2026-08-19 — do not rebuild ✅ items)
+`ui/` currently carries **15 pre-existing eslint errors** in inherited files (react-refresh
+export rules, `setState`-in-effect, useless escapes). They are not a gate. Do not "fix" them as
+a side quest, and do not add new ones: `pnpm exec eslint <files you touched>` must be clean.
 
-Status of the 51 functionality rows (§4 table numbering):
+## 3. Current implementation status (re-audited against the code 2026-08-20)
 
-- ✅ **IMPLEMENTED** — #1 identity/2FA, #2 orgs/workspaces/RBAC, #3 the 49 integrations,
-  #4 OAuth infra, #5 API-key auth, #6 registry, #7 `/mcp` gateway, #9 discovery,
-  #10 execution, #14 custom remote MCP (SSRF-guarded), #15 OpenAPI import, #17 normalization,
-  #18 cycle-safe `$ref`, #19 compiler IR, #22 collision detection, #24 security translation,
-  #43 CLI, #46 REST API, #47 frontend, #49 admin.
-- 🟡 **PARTIAL** — #8 (StreamableHTTP only; no stdio/SSE), #11 governance
-  (approve-exact-forever + viewer `tools:execute` enforcement missing), #12 (logs/analytics
-  exist; no OTel/Langfuse), #13 playground, #16 (spec-validator, no Spectral-style linting),
-  #20/#21/#23/#25/#26/#27 (compiler core exists; REST wiring, UI wizard, HTTP runtime for
-  compiled tools not wired), #41/#42, #44 (CLI package exists, unpublished), #48 (billing
-  scaffolding, no event metering), #50, #51 (CI gates fly deploy; no full pipeline).
-- ❌ **NOT BUILT** — #28–#40 (generated standalone servers, their testing/Docker packaging,
-  all deployment: abstraction, lifecycle, monitoring, Swaraj Cloud adapter, runtime secrets
-  injection, deployed-MCP security/governance), #29 extra transports, #45 SDKs.
+Every row below was verified by reading the named file. **Do not rebuild ✅ rows.** For 🟡 rows,
+build only the named missing piece. Row numbers match the §4 table.
 
-Known limitations already documented (respect, don't "discover" them): datadog dual-token
-storage is singular; `EnvVarAuth` is dead code; org deletion button inert; SQLite
-`PRAGMA foreign_keys=ON` deferred pending delete-ordering review.
+**✅ IMPLEMENTED (33 rows) — evidence:**
+
+| # | Where it lives |
+|---|---|
+| 1 | `api/user_auth.py` (login, lockout, rate limit), `api/totp.py` (real TOTP + recovery codes), `api/second_factor.py` |
+| 2 | `authz.py` — 5-role matrix × 11 permissions; `api/orgs.py` (members, invitations, last-owner protection), `api/workspaces.py` |
+| 3 | `integrations/bundled/` — 48 integration modules |
+| 4 | `api/auth.py` (start/callback/token exchange), `mcp/oauth.py` (expiry + refresh), `mcp/oauth_provider.py` (Sutr as an OAuth provider) |
+| 5 | `api/api_keys.py` (hashed `ap_` keys), consumed by `dependencies.py` and `mcp/asgi.py` |
+| 6 | `api/custom_mcp.py` + `integrations/registry.py`, exposed via `mcp/management_tools.py` |
+| 7 | `main.py` mounts `/mcp`; `mcp/server.py` `StreamableHTTPSessionManager`; auth in `mcp/asgi.py` |
+| 9 | `api/tools.py` (list/describe) and `mcp/management_tools.py` (search across integrations) |
+| 10 | `services/tool_pipeline.py` — the single canonical pipeline shared by REST and MCP, incl. OAuth refresh-retry, metering, tracing, logging |
+| 11 | `approvals/policy.py` (allow/deny/require_approval), `approvals/requests.py` (approve-once, approve-exact-forever, allow-tool-forever), viewer `tools:execute` enforced, audit trail + `services/redaction.py` |
+| 13 | `ui/src/pages/PlaygroundPage.tsx` — selector → schema-driven form → execute, with live approval long-poll |
+| 14 | `api/custom_mcp.py` guarded by `upstream_safety.py` (DNS-resolved loopback/private/link-local blocks, no redirects, no embedded credentials) |
+| 18 | `openapi/resolver.py` — DFS with `on_path` cycle placeholders, external `$ref` refused, depth/node budgets |
+| 19 | `openapi/normalizer.py` — `ApiDefinition`/`Operation`/`Server`/`SecurityScheme` IR, persisted as `ir_json` |
+| 20 | `openapi/compiler.py` `filter_operations` (tags/paths/operationIds/deprecated) + selection UI in `McpBuilderPage.tsx` |
+| 21 | `openapi/compiler.py` `compile_definition` |
+| 22 | `openapi/compiler.py` `assign_tool_names` — deterministic 3-step naming, fails loudly rather than duplicating; `renamed_from` surfaced |
+| 23 | `openapi/compiler.py` `_tool_description` + per-param descriptions into the input schema (spec-sourced only, nothing invented) |
+| 25 | `api_client.py` `dispatch_api_tool` — real httpx call, SSRF re-validated at dispatch, response truncation |
+| 27 | `openapi/normalizer.py` `substitute_server_url` (enum-validated, raises on unresolved vars) + server picker UI |
+| 30 | `openapi/packaging.py` — 9-file self-contained package, zero Sutr dependency |
+| 31 | `openapi/packaging.py` `TEST_PY` — offline pytest suite emitted per package |
+| 32 | `openapi/packaging.py` `DOCKERFILE` — per-package image |
+| 34 | `deploy/base.py` `DeploymentProvider` ABC (available/deploy/status/start/stop/remove/logs) + `deploy/registry.py` |
+| 38 | `services/deployments.py` → `deploy/docker_provider.py`: KMS-backed secrets injected as env vars at deploy time, never baked into the image |
+| 41 | `integrations/registry.py` merges bundled + custom MCP + compiled OpenAPI; `services/tool_catalog.py` unifies discovery/caching |
+| 43 | `cli/src/index.ts` — 7 command groups: auth, deploy, integrations, openapi, tools, output, usage |
+| 44 | `sutr-cli` v1.1.1 **is published on npm** and matches the local version (manual publish; no CI job) |
+| 46 | 28 routers under `api/`, 29 `include_router` calls in `main.py` |
+| 47 | 23 pages under `ui/src/pages/` |
+| 49 | `api/admin.py` (instance settings, waitlist, users, impersonation) + `ui/src/pages/AdminPage.tsx` |
+| 50 | `rate_limit.py`, `upstream_safety.py`, `secrets/kms.py` (AES-256-GCM envelope encryption), `Caddyfile` (TLS + reverse proxy) |
+
+**🟡 PARTIAL — the missing piece is named; build only that:**
+
+| # | What exists | What is missing |
+|---|---|---|
+| 8 | StreamableHTTP gateway at `/mcp`; outbound client also StreamableHTTP-only | stdio and SSE gateway transports |
+| 12 | Prometheus metrics wired at `/metrics`; OpenTelemetry tracing real but off by default (`settings.otel_enabled`) | structured/JSON log output — `main.py` still uses plain-text `logging.basicConfig` |
+| 15 | paste, direct URL, GitHub (repo/tree/blob/raw + discovery), SwaggerHub — all end to end | nothing outstanding for those four; `upload` remains an alias of `paste` (the UI reads the file client-side and sends text) |
+| 16 | `openapi_spec_validator` against the official 3.0/3.1 schemas, first error surfaced | a Spectral-style rule layer (rule IDs, severities, best-practice checks) and multi-error reporting |
+| 17 | 3.0.x and 3.1.x normalized | Swagger 2.0 → 3.x conversion (currently rejected outright with an actionable message) |
+| 24 | `apiKey` in header, `http` bearer/basic; untranslatable schemes emit warnings | query/cookie `apiKey`; a real OAuth2 grant flow (oauth2/openIdConnect degrade to a pasted bearer token); more than one active scheme |
+| 26 | JSON request bodies (`application/json`, `+json`) | form-urlencoded, multipart, and binary bodies — non-JSON bodies currently emit `unsupported_body` and are dropped |
+| 28 | Sutr's hosted gateway proxies compiled tools dynamically; packaging emits standalone servers | the two are separate code paths with no shared mode toggle |
+| 29 | Generated servers offer `--transport stdio\|http` | plain SSE transport in generated servers |
+| 36 | deploy / start / stop / delete / status | `sync`/`update` (redeploy with a new package) — today it is delete-and-recreate |
+| 37 | status polling via `provider.status()`, `/logs` endpoint, `/health` in generated servers | metrics collection (CPU/memory/request counts); the generated `/health` probe is never scraped by Sutr |
+| 40 | Compiled tools called through Sutr's gateway route through the full approval pipeline | a generated package running on your own infra executes with no approval hook — **by design**, and it must be stated as a limitation, not silently fixed |
+| 42 | Browse grid with text search over bundled + custom | a marketplace proper: categories, tags, install counts, dedicated route |
+| 45 | Both SDKs exist and are CI-tested (`sdk/python`, `sdk/typescript`) | publishing — `@sutr/sdk` and `sutr-sdk` both 404 on their registries |
+| 48 | Durable `usage_event` ledger (never pruned) + real Stripe customer/checkout/portal/webhook | quota or plan-limit enforcement — zero `quota` references in the server; only IP/org rate limits exist |
+| 51 | 4 workflows: backend lint, frontend lint, tests (server + both SDKs), fly deploy gated on pytest | CLI build/test job, npm/PyPI publish automation, security scanning (CodeQL / dependency audit) |
+
+**❌ NOT BUILT:**
+
+| # | Note |
+|---|---|
+| 33 | Cloud deployment — only the local Docker provider exists; no GitOps/Argo-style app lifecycle |
+| 35 | Swaraj Cloud adapter — the name appears **only in comments**. Do not invent its API; obtain real docs from the user first |
+| 39 | Deployed-MCP identity/authz — `docker_provider.py` binds the endpoint to 127.0.0.1 and has no auth of its own, which is why the provider is disabled on multi-tenant instances (`deploy/registry.py`) |
+
+**Only one deployment provider exists:** `DockerProvider` (`deploy/docker_provider.py`, id `"docker"`).
+There is **no Kubernetes provider**. `models/deployment.py` and `deploy/registry.py` mention
+Kubernetes/Argo/Swaraj only as future work.
+
+Known limitations already documented (respect, don't "discover" them): TOTP secrets are stored
+in plaintext; the SSRF guard resolves DNS at validation time and does not pin the address against
+rebinding; rate-limit and approval-event state is per-worker (in-process), so multi-worker
+deployments enforce per-worker budgets; datadog dual-token storage is singular; `EnvVarAuth` is
+dead code; org deletion button inert; SQLite `PRAGMA foreign_keys=ON` deferred pending
+delete-ordering review.
 
 ## 4. Functionality × reference map (authoritative)
 
@@ -173,49 +242,85 @@ reference. Study the reference's docs/README/data model — do not import its co
 | 50 | Security | Keycloak + [OWASP CRS](https://github.com/coreruleset/coreruleset) | Security controls; WAF rules belong at the Caddy/edge layer |
 | 51 | CI/CD & quality | Argo CD + CNOE codegen | Automated build/test/deploy (tests already gate fly deploy) |
 
-## 5. Build order (remaining phases)
+**Additional reference — the spec-import flow.** [`sanketwork300-hash/apitomcp`](https://github.com/sanketwork300-hash/apitomcp)
+is the author's own prototype of the fetch → normalize → compile → generate pipeline. Take from
+it: the **source-adapter boundary** (`backend/sources/github_source.py`,
+`backend/sources/swaggerhub_source.py`, `backend/swaggerhub/client.py`) — provider knowledge
+stays in an adapter and never leaks into the pipeline; the SwaggerHub URL host set and
+`/apis|/apis-docs/{owner}/{api}/{version}` path forms; the raw-API-key (non-Bearer) auth header;
+and the spec-filename priority list. Sutr's equivalent is `server/src/sutr/openapi/sources.py`.
+Do **not** copy its structure wholesale — it has no tenancy, no governance, and no SSRF guard.
 
-Work strictly in this order; each phase ends with the verification gate + a `SUTR_PROGRESS.md`
-entry. Do not start a phase early because it "seems easy".
+## 4a. The canonical spec → MCP flow (do not restructure this)
 
-**Phase 4 — MCP hardening.** Reduce REST/MCP code duplication (shared pipeline); optional
-per-call upstream connection reuse. Rows: 6–8, 10.
+The builder is a six-stage wizard in `ui/src/pages/McpBuilderPage.tsx`, backed end to end by real
+endpoints. Each stage maps to one server capability:
 
-**Phase 5 — Governance completion.** Unify REST/MCP execution pipeline; approval
-`approve-exact-forever`; enforce viewer `tools:execute` on all execution paths; audit trail
-table + log redaction; decision-row locking. Rows: 11, 12 (audit part), 40.
+| Stage | UI step | Server |
+|---|---|---|
+| 1 | **Source** — GitHub, SwaggerHub, Direct URL, or Paste (with a local-file picker) | `POST /api/openapi/import` |
+| 2 | **Choose file** — shown only when a repository holds more than one spec | `POST /api/openapi/discover` |
+| 3 | **Normalize & IR** — validated, `$ref`s resolved, operations/servers/security extracted | `openapi/normalizer.py` + `resolver.py` |
+| 4 | **Select tools** — per-operation checkboxes, tag filter, search | `filters.include_operations` |
+| 5 | **Authentication** — header + `{token}` format, prefilled from the spec's security schemes | `openapi/security.py` |
+| 6 | **Build & deploy** — dry-run preview, then compile; optionally package and deploy | `POST /api/openapi/{id}/compile`, `/package`, `/api/deployments` |
 
-**Phase 6 — OpenAPI compiler completion.** REST wiring for `openapi_projects` (compile,
-preview, publish); UI import wizard (upload/URL → validate → filter by tag/operation → name
-collisions surfaced → publish); Spectral-style actionable lint layer; LLM-oriented description
-enrichment. Rows: 15–24 tails.
+Rules that must hold:
 
-**Phase 7 — HTTP execution runtime.** Execute compiled tools through the gateway: httpx
-runtime honoring `servers` variables, all `requestBody` media types (JSON/form/multipart/
-binary), security schemes from `openapi/security.py`, per-integration rate limits, `/mcp`
-exposure + approvals. Rows: 25–28 (dynamic mode).
+- **Credentials are pinned to their provider's host.** A `github_token` is only ever attached to
+  a request whose host already resolved to GitHub; likewise SwaggerHub. There is a regression test
+  for exactly this (`tests/test_openapi/test_sources.py::test_github_token_travels_only_to_github`).
+  Source tokens are used for one request and **never persisted**.
+- **Discovery ranks, it does not decide.** `_rank_candidate` orders `openapi.*` before `swagger.*`,
+  shallower before deeper, YAML before JSON, merely spec-shaped names last. The first entry is a
+  default selection the user can override with `path`.
+- **A generic `url` import auto-detects GitHub/SwaggerHub links** and routes them through the
+  adapter, because a raw GET on a repository URL returns an HTML page and fails with a parse error
+  that explains nothing.
+- **Compiled tools reuse `CustomApiIntegration`** so they travel the same install → discovery →
+  approval → execution path as every other integration. Never give generated tools their own
+  execution path.
+- **Every token and URL field carries `help` text** naming the scope needed, why it is needed, and
+  that it is not stored. This is a product requirement, not decoration.
 
-**Phase 8 — Generated servers.** Emit a self-contained Python MCP server package per OpenAPI
-project (CNOE-style): stdio + SSE + StreamableHTTP transports, tests, Dockerfile. Rows: 28–32.
+## 5. Build order
 
-**Phase 9 — Deployment.** `DeploymentProvider` interface (deploy/sync/update/delete/status);
-Kubernetes adapter; **Swaraj Cloud adapter only after real API docs are provided**; health/
-metrics; secret injection; deployed-server auth wired to Sutr identity. Rows: 33–39.
+**Phases 4–14 of the original plan are complete** (shared execution pipeline, governance,
+OpenAPI compiler, HTTP runtime, generated servers, local Docker deployment, observability and
+metering, SDKs, frontend, security hardening, E2E validation). See `SUTR_PROGRESS.md` for what
+each phase delivered. The remaining work is the 🟡/❌ list in §3, ordered by dependency:
 
-**Phase 10 — Observability & metering.** OTel tracing on every tool execution; usage events →
-OpenMeter-style metering feeding `billing/`. Rows: 12, 48.
+**Next — request-body coverage (row 26).** Form-urlencoded, multipart, and binary bodies in
+`openapi/normalizer.py` (stop dropping them at `_pick_json_content`) and `api_client.py`
+(serialize per media type). Highest-value gap: today any non-JSON-body operation compiles to a
+tool that cannot send its payload. Must also flow into `openapi/packaging.py`'s `RUNTIME_PY` so
+generated servers behave identically.
 
-**Phase 11 — SDK & CLI.** TypeScript + Python SDKs mirroring `/api`; publish npm packages.
-Rows: 43–45.
+**Then — security-scheme coverage (row 24).** Query and cookie `apiKey`; multiple active schemes.
+A real OAuth2 client-credentials/authorization-code grant for compiled APIs is a separate,
+larger piece — do not fold it in silently.
 
-**Phase 12 — Frontend completion.** Playground (search→test→execute), marketplace/discovery
-views, deployment dashboard, org Danger Zone (real org deletion). Rows: 13, 42, 47.
+**Then — Kubernetes deployment provider (rows 33, 34, 36, 37, 39).** One new class behind the
+existing `DeploymentProvider` ABC. Requires: a `sync`/`update` path (today it is
+delete-and-recreate), metrics scraping of the generated `/health` probe, and an identity/authz
+story for the deployed endpoint — which is the actual blocker, not the manifests.
+**Swaraj Cloud (row 35) comes after, and only once the user supplies real API docs.**
 
-**Phase 13 — Security hardening.** OWASP-CRS-informed edge rules (Caddyfile), secrets-handling
-review, dependency audit, authz fuzz tests. Row: 50.
+**Then — quota enforcement (row 48).** The `usage_event` ledger already records everything
+needed; what is missing is plan limits and a refusal path. Refusals must not be metered, matching
+the existing rule for gated and rate-limited calls.
 
-**Phase 14 — E2E validation.** Full-journey live tests: signup → org → install integration →
-OAuth connect → import OpenAPI → compile → execute → approve → deploy → observe → meter.
+**Then — spec linting (row 16)** and **structured JSON logs (row 12)**, both self-contained.
+
+**Then — publishing (rows 45, 51).** Publish `@sutr/sdk` and `sutr-sdk`; add the CLI to CI and
+automate releases; add dependency/code scanning.
+
+**Deliberately not planned:** Swagger 2.0 conversion (row 17 — rejecting with an actionable
+message is the decision on record) and approval hooks inside generated standalone packages
+(row 40 — they run on the operator's own infrastructure by design).
+
+Each unit ends with the verification gate + a `SUTR_PROGRESS.md` entry. Do not start one early
+because it "seems easy".
 
 ## 6. Definition of done (per phase)
 

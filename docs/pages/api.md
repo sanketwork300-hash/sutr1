@@ -349,9 +349,36 @@ Import a specification. Requires `integrations:manage`.
 }
 ```
 
-`source_kind` is `paste`, `upload`, or `url` (with `url` instead of `content`). URL fetches are SSRF-screened (no private/loopback targets, no redirects) and size-capped. The document is validated against the official OpenAPI 3.0/3.1 schemas; `$ref`s are resolved cycle-safely; Swagger 2.0 is rejected.
+`source_kind` is one of `paste`, `upload`, `url`, `github`, or `swaggerhub`.
 
-**Response (201):** the project with `api_title`, `api_version`, `operation_count`, per-operation summaries, discovered `tags`, `servers`, and `suggested_auth` translated from the spec's security schemes.
+- **`paste` / `upload`** — the document arrives in `content`.
+- **`url`** — a direct link to the document. SSRF-screened (no private, loopback, or link-local targets), redirects are not followed, and the response is size-capped.
+- **`github`** — `url` is any GitHub repository, tree, blob, or `raw.githubusercontent.com` link. If it does not already name a file, Sutr picks the best candidate itself (see `/discover` below). Pass `path` to choose a specific file, and `github_token` for a private repository. The token is used for that one request and never stored.
+- **`swaggerhub`** — `url` is a SwaggerHub API URL (`app.`, `portal.`, or `api.swaggerhub.com`, in `/apis/{owner}/{api}/{version}` form). Pass `swaggerhub_api_key` for a private API; SwaggerHub expects the key as-is, so Sutr sends it unprefixed rather than as a Bearer token. `resolved` (default `true`) asks SwaggerHub to inline `$ref`s before returning the document.
+
+Provider credentials are pinned to their provider's host: a `github_token` is only ever attached to a request whose host already resolved to GitHub, and likewise for SwaggerHub. In every case the document is validated against the official OpenAPI 3.0/3.1 schemas, `$ref`s are resolved cycle-safely, external `$ref`s are refused, and Swagger 2.0 is rejected.
+
+**Response (201):** the project with `api_title`, `api_version`, `operation_count`, per-operation summaries, discovered `tags`, `servers`, `security_schemes`, `suggested_auth` translated from the spec's security schemes, `source_url`, and — for `github`/`swaggerhub` — a `provenance` object recording exactly which owner, repository, branch, and path the document came from.
+
+### `POST /api/openapi/discover`
+
+List the specification files in a GitHub repository before importing one. Requires `integrations:manage`.
+
+**Body:** `{"url": "https://github.com/owner/repo", "github_token": "<optional>"}`
+
+Resolves the repository's default branch when the URL names none, walks the tree once, and returns the spec-shaped files it found:
+
+```json
+{
+  "source_kind": "github",
+  "owner": "swagger-api", "repo": "swagger-petstore", "branch": "master",
+  "candidates": [
+    {"path": "src/main/resources/openapi.yaml", "filename": "openapi.yaml", "size": 23165}
+  ]
+}
+```
+
+Candidates are ordered best-first: `openapi.*` before `swagger.*`, shallower paths before deeper ones, YAML before JSON, and merely spec-shaped filenames last. The first entry is a *default selection*, not a decision — pass whichever `path` you want to `/import`. A `/tree/` URL scopes the search to that subdirectory. When the repository contains no specification the call fails with `no_spec_found` and names the paths it searched.
 
 ### `GET /api/openapi` / `GET /api/openapi/{project_id}`
 
@@ -390,7 +417,7 @@ The zip is a self-contained Python project with no Sutr dependency: `server.py` 
 
 Delete the import artifact. A compiled integration lives on and is managed through the custom-API endpoints.
 
-CLI equivalents: `sutr openapi import|list|show|compile|package|delete`.
+CLI equivalents: `sutr openapi discover|import|list|show|compile|package|delete`. `sutr openapi import --url` accepts GitHub and SwaggerHub links directly; `--path` picks a file inside a repository, and credentials come from `--github-token` / `--swaggerhub-key` or the `SUTR_GITHUB_TOKEN` / `SUTR_SWAGGERHUB_API_KEY` environment variables.
 
 ---
 

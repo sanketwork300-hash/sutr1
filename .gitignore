@@ -153,3 +153,7 @@ __pycache__/
 
 .env
 .pnpm-store/
+
+# The UI bundle copied into the server image so one process can serve both.
+# Produced by `pnpm build` + the Dockerfile; never a source of truth.
+server/ui_dist/

@@ -121,6 +121,41 @@ async def test_import_from_url_uses_fetcher(client, monkeypatch):
     fetched.assert_awaited_once()
 
 
+async def test_url_import_routes_github_links_through_the_adapter(client, monkeypatch):
+    """A repository URL pasted into the generic `url` source must not be GET'd.
+
+    A raw fetch would return the HTML repository page and fail on a parse error
+    that says nothing about the real mistake, so the provider is detected and its
+    adapter used instead.
+    """
+    raw = AsyncMock(return_value=json.dumps(PETSTORE))
+    monkeypatch.setattr("sutr.api.openapi_projects.fetch_spec_from_url", raw)
+
+    from sutr.openapi.sources import FetchedSpec
+
+    adapter = AsyncMock(
+        return_value=FetchedSpec(
+            content=json.dumps(PETSTORE),
+            source_kind="github",
+            source_url="https://github.com/o/r/blob/main/openapi.yaml",
+            provenance={"owner": "o", "repo": "r", "branch": "main", "path": "openapi.yaml"},
+        )
+    )
+    monkeypatch.setattr("sutr.api.openapi_projects.fetch_from_github", adapter)
+
+    resp = await client.post(
+        "/api/openapi/import",
+        json={"source_kind": "url", "url": "https://github.com/o/r"},
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    # The stored kind reflects what actually happened, not what was requested.
+    assert body["source_kind"] == "github"
+    assert body["provenance"]["repo"] == "r"
+    adapter.assert_awaited_once()
+    raw.assert_not_awaited()
+
+
 async def test_compile_dry_run_previews_without_side_effects(client, session, test_org):
     project = await _import(client)
     resp = await client.post(

@@ -62,44 +62,122 @@ function splitList(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
+interface SpecCandidate {
+  path: string;
+  filename: string;
+  size: number | null;
+}
+
+interface DiscoverResult {
+  source_kind: string;
+  owner: string;
+  repo: string;
+  branch: string | null;
+  candidates: SpecCandidate[];
+}
+
 openapiCommand
-  .command("import")
-  .description("Import an OpenAPI 3.x document (from a file or a URL)")
-  .option("--file <path>", "Path to a local spec file (JSON or YAML)")
-  .option("--url <url>", "URL of the spec")
-  .option("--name <name>", "Project name (defaults to the API title)")
+  .command("discover")
+  .description("List the OpenAPI spec files in a GitHub repository")
+  .argument("<url>", "GitHub repository, tree, or blob URL")
+  .option(
+    "--github-token <token>",
+    "Token for a private repository (falls back to $SUTR_GITHUB_TOKEN)",
+  )
   .option("-o, --output <format>", "Output format")
-  .action(async (opts: { file?: string; url?: string; name?: string; output: string }) => {
+  .action(async (url: string, opts: { githubToken?: string; output: string }) => {
     const format = resolveFormat(opts.output);
-    if (!opts.file && !opts.url) {
-      printError("Provide --file <path> or --url <url>.", 1);
-    }
-    if (opts.file && opts.url) {
-      printError("--file and --url are mutually exclusive.", 1);
-    }
     try {
-      const body: Record<string, unknown> = { name: opts.name };
-      if (opts.file) {
-        body.source_kind = "paste";
-        body.content = readFileSync(opts.file, "utf-8");
-      } else {
-        body.source_kind = "url";
-        body.url = opts.url;
-      }
-      const project = await request<ProjectRow>("/api/openapi/import", {
+      const result = await request<DiscoverResult>("/api/openapi/discover", {
         method: "POST",
-        body,
+        body: {
+          url,
+          github_token: opts.githubToken ?? process.env.SUTR_GITHUB_TOKEN,
+        },
       });
-      print(projectSummary(project), format);
+      print(
+        result.candidates.map((c) => ({
+          path: c.path,
+          filename: c.filename,
+          bytes: c.size ?? "-",
+        })),
+        format,
+      );
       if (format === "human") {
         console.log(
-          `\nNext: sutr openapi compile ${project.id} --dry-run   (preview the tools)`,
+          `\n${result.owner}/${result.repo} @ ${result.branch ?? "default branch"}` +
+            `\nBest match first. Import one with:` +
+            `\n  sutr openapi import --url ${url} --path ${result.candidates[0]?.path ?? "<path>"}`,
         );
       }
     } catch (e) {
       printError((e as Error).message, 1);
     }
   });
+
+openapiCommand
+  .command("import")
+  .description("Import an OpenAPI 3.x document (local file, URL, GitHub, or SwaggerHub)")
+  .option("--file <path>", "Path to a local spec file (JSON or YAML)")
+  .option("--url <url>", "Spec URL, or a GitHub / SwaggerHub link (detected automatically)")
+  .option("--path <path>", "For a GitHub repository: which spec file to import")
+  .option(
+    "--github-token <token>",
+    "Token for a private repository (falls back to $SUTR_GITHUB_TOKEN)",
+  )
+  .option(
+    "--swaggerhub-key <key>",
+    "SwaggerHub API key for a private API (falls back to $SUTR_SWAGGERHUB_API_KEY)",
+  )
+  .option("--name <name>", "Project name (defaults to the API title)")
+  .option("-o, --output <format>", "Output format")
+  .action(
+    async (opts: {
+      file?: string;
+      url?: string;
+      path?: string;
+      githubToken?: string;
+      swaggerhubKey?: string;
+      name?: string;
+      output: string;
+    }) => {
+      const format = resolveFormat(opts.output);
+      if (!opts.file && !opts.url) {
+        printError("Provide --file <path> or --url <url>.", 1);
+      }
+      if (opts.file && opts.url) {
+        printError("--file and --url are mutually exclusive.", 1);
+      }
+      try {
+        const body: Record<string, unknown> = { name: opts.name };
+        if (opts.file) {
+          body.source_kind = "paste";
+          body.content = readFileSync(opts.file, "utf-8");
+        } else {
+          // The server detects GitHub and SwaggerHub links and routes them
+          // through the right adapter, so the CLI does not duplicate that rule.
+          body.source_kind = "url";
+          body.url = opts.url;
+          body.path = opts.path;
+          body.github_token = opts.githubToken ?? process.env.SUTR_GITHUB_TOKEN;
+          body.swaggerhub_api_key =
+            opts.swaggerhubKey ?? process.env.SUTR_SWAGGERHUB_API_KEY;
+        }
+        const project = await request<ProjectRow>("/api/openapi/import", {
+          method: "POST",
+          body,
+        });
+        print(projectSummary(project), format);
+        if (format === "human") {
+          console.log(
+            `\nNext: sutr openapi compile ${project.id} --dry-run   (preview the tools)`,
+          );
+        }
+      } catch (e) {
+        printError((e as Error).message, 1);
+      }
+    },
+  );
 
 openapiCommand
   .command("list")

@@ -12,8 +12,7 @@ const GoogleCallbackPage = lazy(() => import('@/pages/GoogleCallbackPage'))
 const ConnectionsPage = lazy(() => import('@/pages/ConnectionsPage'))
 const ConnectionDetailPage = lazy(() => import('@/pages/ConnectionDetailPage'))
 const CustomApiBuilderPage = lazy(() => import('@/pages/CustomApiBuilderPage'))
-const CustomApiSetupPage = lazy(() => import('@/pages/CustomApiSetupPage'))
-const OpenApiImportPage = lazy(() => import('@/pages/OpenApiImportPage'))
+const McpBuilderPage = lazy(() => import('@/pages/McpBuilderPage'))
 const DeploymentsPage = lazy(() => import('@/pages/DeploymentsPage'))
 const UsagePage = lazy(() => import('@/pages/UsagePage'))
 const ApprovalsPage = lazy(() => import('@/pages/ApprovalsPage'))
@@ -67,8 +66,14 @@ export default function App() {
           <Route path="/join" element={<JoinPage />} />
           <Route element={<AppLayout />}>
             <Route path="/integrations" element={<ConnectionsPage />} />
-            <Route path="/integrations/custom-api/new" element={<CustomApiSetupPage />} />
-            <Route path="/integrations/openapi/new" element={<OpenApiImportPage />} />
+            {/* The hand-rolled custom-API setup page is retired: /openapi/new
+                derives the same integration from a specification. Old links
+                land on the builder rather than 404ing. */}
+            <Route
+              path="/integrations/custom-api/new"
+              element={<Navigate to="/integrations/openapi/new" replace />}
+            />
+            <Route path="/integrations/openapi/new" element={<McpBuilderPage />} />
             <Route
               path="/integrations/custom-api/:integrationDbId"
               element={<CustomApiBuilderPage />}

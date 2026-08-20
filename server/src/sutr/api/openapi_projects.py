@@ -40,6 +40,13 @@ from sutr.openapi import (
     translate_security,
 )
 from sutr.openapi.packaging import build_server_package
+from sutr.openapi.sources import (
+    detect_source_kind,
+    discover_github_specs,
+    fetch_from_github,
+    fetch_from_swaggerhub,
+    parse_github_url,
+)
 from sutr.services.audit import actor_from_agent_auth, record_audit
 from sutr.token_auth import validate_token_auth_config
 
@@ -56,10 +63,30 @@ def _http_error(exc: OpenAPIError) -> HTTPException:
 
 class ImportRequest(BaseModel):
     name: str | None = Field(default=None, max_length=80)
-    source_kind: str = "paste"  # paste | upload | url
+    # paste | upload | url | github | swaggerhub
+    source_kind: str = "paste"
     content: str | None = None
     url: str | None = None
     workspace_id: uuid.UUID | None = None
+    # github: pick one file when a repository holds several. Omit to
+    # auto-discover the conventional spec file.
+    path: str | None = Field(default=None, max_length=500)
+    # Credentials for private sources. Used for this request only and never
+    # stored: re-supply them if you re-import.
+    github_token: str | None = Field(default=None, max_length=500)
+    swaggerhub_api_key: str | None = Field(default=None, max_length=500)
+    # Ask SwaggerHub to inline external $refs before sending us the document.
+    resolved: bool = True
+
+
+class DiscoverRequest(BaseModel):
+    """Look inside a GitHub repository before importing anything."""
+
+    url: str = Field(min_length=1, max_length=2000)
+    github_token: str | None = Field(default=None, max_length=500)
+
+
+SOURCE_KINDS = ("paste", "upload", "url", "github", "swaggerhub")
 
 
 class AuthConfig(BaseModel):
@@ -194,11 +221,51 @@ async def import_spec(
 ) -> dict:
     ensure_agent_can(session, agent_auth, "integrations:manage")
 
-    if body.source_kind not in ("paste", "upload", "url"):
-        raise HTTPException(status_code=400, detail="source_kind must be paste, upload, or url")
+    if body.source_kind not in SOURCE_KINDS:
+        raise HTTPException(
+            status_code=400, detail=f"source_kind must be one of: {', '.join(SOURCE_KINDS)}"
+        )
+
+    source_kind = body.source_kind
+    # A generic URL that is really a GitHub or SwaggerHub link goes through that
+    # provider's adapter instead of a raw GET. Without this, pasting a repository
+    # URL into the plain URL source fetches an HTML page and fails on a parse
+    # error that says nothing about the actual mistake.
+    if source_kind == "url" and body.url:
+        detected = detect_source_kind(body.url)
+        if detected in ("github", "swaggerhub"):
+            source_kind = detected
+
+    source_url = body.url if source_kind in ("url", "github", "swaggerhub") else None
+    provenance: dict = {}
 
     try:
-        if body.source_kind == "url":
+        if source_kind == "github":
+            if not body.url:
+                raise HTTPException(
+                    status_code=400,
+                    detail="url is required — paste a GitHub repository or file URL",
+                )
+            fetched = await fetch_from_github(body.url, path=body.path, token=body.github_token)
+            spec_text, source_url, provenance = (
+                fetched.content,
+                fetched.source_url,
+                fetched.provenance,
+            )
+        elif source_kind == "swaggerhub":
+            if not body.url:
+                raise HTTPException(
+                    status_code=400, detail="url is required — paste the SwaggerHub API URL"
+                )
+            fetched = await fetch_from_swaggerhub(
+                body.url, api_key=body.swaggerhub_api_key, resolved=body.resolved
+            )
+            spec_text, source_url, provenance = (
+                fetched.content,
+                fetched.source_url,
+                fetched.provenance,
+            )
+        elif source_kind == "url":
             if not body.url:
                 raise HTTPException(status_code=400, detail="url is required for URL import")
             spec_text = await fetch_spec_from_url(body.url)
@@ -216,8 +283,8 @@ async def import_spec(
         org_id=agent_auth.org.id,
         workspace_id=body.workspace_id,
         name=body.name or definition.title[:80],
-        source_kind=body.source_kind,
-        source_url=body.url if body.source_kind == "url" else None,
+        source_kind=source_kind,
+        source_url=source_url,
         spec_text=spec_text,
         ir_json=definition.model_dump_json(),
         warnings_json=json.dumps([w.model_dump() for w in definition.warnings]),
@@ -230,11 +297,47 @@ async def import_spec(
         distinct_id=str(agent_auth.org.id),
         event="openapi_imported",
         properties={
-            "source_kind": body.source_kind,
+            "source_kind": source_kind,
             "operation_count": len(definition.operations),
         },
     )
-    return _serialize_project(project, detail=True)
+    detail = _serialize_project(project, detail=True)
+    detail["provenance"] = provenance
+    return detail
+
+
+@router.post("/discover")
+async def discover_specs(
+    body: DiscoverRequest,
+    session: Session = Depends(get_session),
+    agent_auth: AgentAuth = Depends(get_agent_auth),
+) -> dict:
+    """List the OpenAPI/Swagger files in a GitHub repository.
+
+    Lets the wizard show a chooser when a repository holds several specs,
+    instead of silently picking one. Nothing is stored.
+    """
+    ensure_agent_can(session, agent_auth, "integrations:manage")
+    try:
+        kind = detect_source_kind(body.url)
+        if kind != "github":
+            raise OpenAPIError(
+                "unsupported_source",
+                "Discovery works on GitHub repositories. For SwaggerHub or a "
+                "direct URL, import the specification straight away.",
+            )
+        target = parse_github_url(body.url)
+        candidates, branch = await discover_github_specs(target, body.github_token)
+    except OpenAPIError as exc:
+        raise _http_error(exc)
+
+    return {
+        "source_kind": "github",
+        "owner": target.owner,
+        "repo": target.repo,
+        "branch": branch,
+        "candidates": [candidate.to_dict() for candidate in candidates],
+    }
 
 
 @router.get("/{project_id}")
