@@ -41,7 +41,7 @@ class _BaseClient:
         if not api_key and not access_token:
             raise SutrError(
                 "No credentials. Pass api_key=... or set SUTR_API_KEY "
-                "(create a key in the Sutr UI under Settings → API Keys)."
+                "(create a key in the Sutr UI under Develop → API Keys)."
             )
         self._base_url = _core.normalize_base_url(
             base_url or os.environ.get("SUTR_BASE_URL") or _core.DEFAULT_BASE_URL

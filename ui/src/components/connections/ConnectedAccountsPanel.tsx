@@ -10,7 +10,7 @@ import {
 } from '@/components/connections/useProviderConnections'
 
 /**
- * Settings → Connected accounts.
+ * Govern → Credentials → Connected accounts.
  *
  * One row per provider this build knows about, whether or not it is set up,
  * because "GitHub is not offered here" and "GitHub is not connected yet" are
@@ -67,9 +67,9 @@ export function ConnectedAccountsPanel() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <p style={{ ...mutedStyle, margin: 0 }}>
-        Accounts sutr may act on for you: GitHub for reading OpenAPI specifications, and the
-        clouds for running generated MCP servers. Disconnecting deletes the stored tokens here —
-        it does not revoke the app on the provider, which only you can do from their settings.
+        Accounts sutr may act on for you: GitHub for reading OpenAPI specifications, and the clouds
+        for running generated MCP servers. Disconnecting deletes the stored tokens here — it does
+        not revoke the app on the provider, which only you can do from their settings.
       </p>
 
       {actionError && (
@@ -134,11 +134,17 @@ function ProviderRow({
           <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
             {provider.display_name}
           </span>
-          <span style={pillStyle}>{provider.kind === 'deploy' ? 'deploy target' : 'spec source'}</span>
-          {connection?.expired && <span style={{ ...pillStyle, ...expiredPillStyle }}>expired</span>}
+          <span style={pillStyle}>
+            {provider.kind === 'deploy' ? 'deploy target' : 'spec source'}
+          </span>
+          {connection?.expired && (
+            <span style={{ ...pillStyle, ...expiredPillStyle }}>expired</span>
+          )}
         </div>
 
-        <p style={{ margin: '4px 0 0', fontSize: 11.5, color: 'var(--text-dim)', lineHeight: 1.55 }}>
+        <p
+          style={{ margin: '4px 0 0', fontSize: 11.5, color: 'var(--text-dim)', lineHeight: 1.55 }}
+        >
           {provider.grant_summary}
         </p>
 
@@ -151,7 +157,13 @@ function ProviderRow({
               : ''}
           </p>
         ) : !provider.configured ? (
-          <p style={{ margin: '6px 0 0', fontSize: 11.5, color: 'var(--badge-amber-text, var(--text-faint))' }}>
+          <p
+            style={{
+              margin: '6px 0 0',
+              fontSize: 11.5,
+              color: 'var(--badge-amber-text, var(--text-faint))',
+            }}
+          >
             {provider.reason}
           </p>
         ) : (

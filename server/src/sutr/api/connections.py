@@ -127,7 +127,8 @@ def _safe_redirect(target: str | None) -> str:
     """
     base = settings.ui_base_url.rstrip("/")
     if not target or not target.startswith("/") or target.startswith("//"):
-        return f"{base}/settings"
+        # Connected accounts live under Govern → Credentials in the console.
+        return f"{base}/app/credentials"
     return f"{base}{target}"
 
 

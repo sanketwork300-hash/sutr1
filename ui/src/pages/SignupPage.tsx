@@ -2,18 +2,17 @@ import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { GoogleLoginButton } from '@/components/GoogleLoginButton'
+import { BrandLockup } from '@/components/shell/BrandMark'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { api } from '@/api/client'
 import { useMediaQuery } from '@/lib/useMediaQuery'
 import { useAuthStore } from '@/stores/auth'
 import { useEmailVerificationStore } from '@/stores/emailVerification'
-import { useThemeStore } from '@/stores/theme'
 
 export default function SignupPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const { theme } = useThemeStore()
   const setAuth = useAuthStore((s) => s.setAuth)
   const clearPendingVerification = useEmailVerificationStore((s) => s.clearPendingVerification)
   const startPendingVerification = useEmailVerificationStore((s) => s.startPendingVerification)
@@ -50,7 +49,7 @@ export default function SignupPage() {
       const res = await api.auth.login(email, password)
       clearPendingVerification()
       setAuth(res.access_token)
-      navigate(redirect || '/integrations')
+      navigate(redirect || '/app')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed')
     } finally {
@@ -61,28 +60,13 @@ export default function SignupPage() {
   const formContent = (
     <div style={formInnerStyle}>
       <div style={{ marginBottom: 28 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <img
-            src={
-              theme === 'dark'
-                ? '/logos/sutr-dark-mode.png'
-                : '/logos/sutr-light-mode.png'
-            }
-            alt="Sutr"
-            style={{ height: 22, width: 'auto' }}
-          />
-          <span
-            style={{
-              fontFamily: "'Space Grotesk', sans-serif",
-              fontSize: 18,
-              fontWeight: 600,
-              color: 'var(--text)',
-              letterSpacing: 0.3,
-            }}
-          >
-            Sutr
-          </span>
-        </div>
+        <Link
+          to="/"
+          aria-label="Swaraj Sutr home"
+          style={{ display: 'inline-block', marginBottom: 10 }}
+        >
+          <BrandLockup size={22} />
+        </Link>
         <h1
           style={{
             fontSize: isDesktop ? 26 : 24,
@@ -95,7 +79,7 @@ export default function SignupPage() {
           Create an account
         </h1>
         <p style={{ fontSize: 14, color: 'var(--text-dim)', margin: 0 }}>
-          Start managing your agent integrations
+          Give your agents infrastructure they can be trusted with
         </p>
       </div>
 

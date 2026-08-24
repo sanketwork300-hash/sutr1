@@ -1,0 +1,415 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Swaraj Sutr — public site
+
+   Wider rhythm than the console, same vocabulary: thin borders, restrained
+   surfaces, monospace for anything technical. Loaded only with the landing
+   route, so the console bundle never pays for it.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.lp {
+  --lp-max: 1180px;
+  --lp-gutter: 28px;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+.lp__shell {
+  max-width: var(--lp-max);
+  margin: 0 auto;
+  padding: 0 var(--lp-gutter);
+}
+
+/* ── Navigation ─────────────────────────────────────────────────────────── */
+
+.lp__nav {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  backdrop-filter: blur(14px);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+
+.lp__nav-inner {
+  max-width: var(--lp-max);
+  margin: 0 auto;
+  padding: 0 var(--lp-gutter);
+  height: 60px;
+  display: flex;
+  align-items: center;
+  gap: 26px;
+}
+
+.lp__nav-links {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  margin-left: 14px;
+}
+
+.lp__nav-link {
+  font-size: 13px;
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.lp__nav-link:hover {
+  color: var(--text);
+}
+
+.lp__nav-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 860px) {
+  .lp__nav-links {
+    display: none;
+  }
+}
+
+/* ── Section scaffolding ────────────────────────────────────────────────── */
+
+.lp__section {
+  padding: 88px 0;
+  border-top: 1px solid var(--border);
+}
+
+.lp__section--flush {
+  border-top: none;
+}
+
+.lp__section-head {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 720px;
+  margin-bottom: 42px;
+}
+
+.lp__rule {
+  height: 1px;
+  background: var(--border);
+  border: none;
+  margin: 0;
+}
+
+@media (max-width: 720px) {
+  .lp__section {
+    padding: 60px 0;
+  }
+  .lp {
+    --lp-gutter: 18px;
+  }
+}
+
+/* ── Hero ───────────────────────────────────────────────────────────────── */
+
+.lp__hero {
+  position: relative;
+  padding: 84px 0 76px;
+}
+
+/* A static engineering grid — no animation, no gradient wash. */
+.lp__hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, #000 0%, transparent 78%);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.lp__hero-inner {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 520px);
+  gap: 56px;
+  align-items: center;
+}
+
+@media (max-width: 1000px) {
+  .lp__hero-inner {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 40px;
+  }
+}
+
+.lp__hero-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  animation: sutr-fade-up var(--dur-slow) var(--ease) both;
+}
+
+.lp__hero-ctas {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.lp__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  height: 26px;
+  padding: 0 10px 0 8px;
+  border-radius: 99px;
+  border: 1px solid var(--brand-border);
+  background: var(--brand-soft);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--brand);
+  letter-spacing: 0.01em;
+}
+
+/* ── Capability strip ───────────────────────────────────────────────────── */
+
+.lp__strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 22px 0;
+}
+
+.lp__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+}
+
+/* ── Generic content grids ──────────────────────────────────────────────── */
+
+.lp__grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.lp__grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.lp__split {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 44px;
+  align-items: center;
+}
+
+@media (max-width: 900px) {
+  .lp__grid-2,
+  .lp__grid-3,
+  .lp__split {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+}
+
+.lp__panel {
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.lp__panel-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--content-bg);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.lp__panel-body {
+  padding: 18px;
+}
+
+.lp__feature {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.lp__feature-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brand-soft);
+  color: var(--brand);
+  margin-bottom: 4px;
+}
+
+/* ── Pipeline: interactive stages ───────────────────────────────────────── */
+
+.lp__stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 22px;
+}
+
+.lp__stage {
+  flex: 1 1 140px;
+  position: relative;
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-dim);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 12px 10px;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+
+.lp__stage:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.lp__stage[aria-selected='true'] {
+  color: var(--brand);
+  border-color: var(--brand-border);
+  background: var(--brand-soft);
+}
+
+.lp__stage-index {
+  display: block;
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+
+/* ── Transformation columns (paths → tools) ─────────────────────────────── */
+
+.lp__transform {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .lp__transform {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .lp__transform-arrow {
+    transform: rotate(90deg);
+  }
+}
+
+.lp__op {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 7px 9px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--border);
+  background: var(--content-bg);
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.lp__op-method {
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  min-width: 40px;
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────────── */
+
+.lp__footer {
+  border-top: 1px solid var(--border);
+  padding: 46px 0 34px;
+}
+
+.lp__footer-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr));
+  gap: 32px;
+}
+
+@media (max-width: 800px) {
+  .lp__footer-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.lp__footer-col {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.lp__footer-link {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  text-decoration: none;
+}
+
+.lp__footer-link:hover {
+  color: var(--text);
+}
+
+/* ── Final call to action ───────────────────────────────────────────────── */
+
+.lp__cta {
+  border: 1px solid var(--brand-border);
+  border-radius: var(--r-xl);
+  background:
+    radial-gradient(120% 140% at 50% 0%, var(--brand-soft) 0%, transparent 62%), var(--surface);
+  padding: 56px 32px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}

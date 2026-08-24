@@ -12,7 +12,10 @@ function applyTheme(theme: Theme) {
   localStorage.setItem('sutr_theme', theme)
 }
 
-const stored = (localStorage.getItem('sutr_theme') as Theme) || 'light'
+// Sutr is a dark-first control plane: dark is the design reference, so a
+// first-time visitor gets it unless they have previously chosen otherwise.
+const saved = localStorage.getItem('sutr_theme')
+const stored: Theme = saved === 'light' || saved === 'dark' ? saved : 'dark'
 applyTheme(stored)
 
 export const useThemeStore = create<ThemeState>((set) => ({

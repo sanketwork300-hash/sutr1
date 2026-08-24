@@ -1,344 +1,469 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, Clock, Inbox, Loader2, ShieldQuestion, XCircle } from 'lucide-react'
+import { Inbox, ShieldQuestion } from 'lucide-react'
 import { api, type ApprovalRequest } from '@/api/client'
+import { useCatalogStore } from '@/stores/catalog'
+import { isTotpChallengeError } from '@/lib/totpError'
+import { TotpCodeDialog } from '@/components/totp/TotpCodeDialog'
+import { formatDateTime, parseTimestamp, prettyJson, relativeTime } from '@/lib/format'
+import {
+  SutrButton,
+  SutrCodeBlock,
+  SutrDefinitionList,
+  SutrDrawer,
+  SutrEmpty,
+  SutrError,
+  SutrPage,
+  SutrPageBody,
+  SutrPageHeader,
+  SutrSectionLabel,
+  SutrStatus,
+  SutrTable,
+  SutrTabs,
+  describeError,
+  type Column,
+} from '@/components/sutr'
 
-const FILTERS = [
-  { key: 'pending', label: 'Pending' },
-  { key: 'approved', label: 'Approved' },
-  { key: 'denied', label: 'Denied' },
-  { key: '', label: 'All' },
-] as const
+type Filter = 'pending' | 'approved' | 'denied' | 'all'
+type Decision = 'approve-once' | 'approve-exact' | 'allow-tool' | 'deny'
 
-const STATUS_TONE: Record<string, { bg: string; text: string }> = {
-  pending: { bg: 'var(--badge-amber-bg)', text: 'var(--badge-amber-text)' },
-  approved: { bg: 'var(--badge-green-bg)', text: 'var(--badge-green-text)' },
-  consumed: { bg: 'var(--badge-green-bg)', text: 'var(--badge-green-text)' },
-  auto_approved: { bg: 'var(--badge-blue-bg)', text: 'var(--badge-blue-text)' },
-  denied: { bg: 'var(--badge-red-bg)', text: 'var(--badge-red-text)' },
-  expired: { bg: 'var(--badge-gray-bg)', text: 'var(--badge-gray-text)' },
+const DECISION_LABEL: Record<Decision, string> = {
+  'approve-once': 'Approve this request',
+  'approve-exact': 'Always allow these exact arguments',
+  'allow-tool': 'Allow this tool for any arguments',
+  deny: 'Deny',
 }
 
-function parseUtc(value: string): Date {
-  // Server timestamps are naive UTC; without the Z the browser reads them local.
-  return new Date(/[Z+]/.test(value) ? value : `${value}Z`)
-}
-
-function relative(value: string): string {
-  const diff = Date.now() - parseUtc(value).getTime()
-  const secs = Math.round(Math.abs(diff) / 1000)
-  const past = diff >= 0
-  const unit =
-    secs < 60
-      ? `${secs}s`
-      : secs < 3600
-        ? `${Math.floor(secs / 60)}m`
-        : secs < 86400
-          ? `${Math.floor(secs / 3600)}h`
-          : `${Math.floor(secs / 86400)}d`
-  return past ? `${unit} ago` : `in ${unit}`
-}
-
+/** A pending request whose expiry has passed is expired in practice, even
+ *  though the row is only rewritten by the maintenance loop. */
 function effectiveStatus(request: ApprovalRequest): string {
-  if (request.status === 'pending' && parseUtc(request.expires_at) <= new Date()) {
+  if (request.status === 'pending' && parseTimestamp(request.expires_at) <= new Date()) {
     return 'expired'
   }
   return request.status
 }
 
+/**
+ * A security operations queue. Each request shows the exact arguments a person
+ * is being asked to authorize, who asked, and how long the window stays open —
+ * and every decision states precisely what it grants.
+ */
 export default function ApprovalsPage() {
-  const [filter, setFilter] = useState<string>('pending')
-  const [requests, setRequests] = useState<ApprovalRequest[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [filter, setFilter] = useState<Filter>('pending')
+  const [requests, setRequests] = useState<ApprovalRequest[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [selected, setSelected] = useState<ApprovalRequest | null>(null)
+  const [busy, setBusy] = useState<Decision | null>(null)
+  const [decisionError, setDecisionError] = useState<string | null>(null)
+  const [totpOpen, setTotpOpen] = useState(false)
+  const [pending, setPending] = useState<Decision | null>(null)
+  const loadPendingApprovals = useCatalogStore((s) => s.loadPendingApprovals)
 
-  const load = useCallback(async (status: string) => {
-    setLoading(true)
+  const load = useCallback(async (status: Filter) => {
     try {
-      setRequests(await api.approvals.list({ status: status || undefined, limit: 100 }))
-      setError('')
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load approvals')
-    } finally {
-      setLoading(false)
+      const list = await api.approvals.list({
+        status: status === 'all' ? undefined : status,
+        limit: 100,
+      })
+      setRequests(list)
+      setError(null)
+    } catch (err) {
+      setError(describeError(err).message)
+      setRequests([])
     }
   }, [])
 
   useEffect(() => {
-    load(filter)
+    void load(filter)
   }, [filter, load])
 
-  // Pending requests expire on a clock, so keep the queue fresh while it's open.
+  // Pending requests expire on a clock, so keep the queue honest while it is open.
   useEffect(() => {
     if (filter !== 'pending') return
-    const timer = window.setInterval(() => load(filter), 15_000)
+    const timer = window.setInterval(() => void load(filter), 15_000)
     return () => window.clearInterval(timer)
   }, [filter, load])
 
-  const grouped = useMemo(() => {
-    const live: ApprovalRequest[] = []
-    const stale: ApprovalRequest[] = []
-    for (const request of requests) {
-      ;(effectiveStatus(request) === 'expired' ? stale : live).push(request)
+  const { live, expired } = useMemo(() => {
+    const liveRows: ApprovalRequest[] = []
+    const expiredRows: ApprovalRequest[] = []
+    for (const request of requests ?? []) {
+      ;(effectiveStatus(request) === 'expired' ? expiredRows : liveRows).push(request)
     }
-    return { live, stale }
+    return { live: liveRows, expired: expiredRows }
   }, [requests])
 
-  return (
-    <div style={{ flex: 1, overflow: 'auto', background: 'var(--bg)', padding: '28px 24px 80px' }}>
-      <div style={{ maxWidth: 820, margin: '0 auto' }}>
-        <div style={{ marginBottom: 16 }}>
-          <h1 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--text)' }}>
-            Approvals
-          </h1>
-          <p style={{ margin: '3px 0 0', fontSize: 12.5, color: 'var(--text-dim)' }}>
-            Tool calls waiting on a human decision. Approving binds to the exact arguments shown.
-          </p>
-        </div>
+  async function decide(action: Decision, totpCode?: string) {
+    if (!selected) return
+    setBusy(action)
+    setDecisionError(null)
+    try {
+      const call =
+        action === 'approve-once'
+          ? api.approvals.approveOnce
+          : action === 'approve-exact'
+            ? api.approvals.approveExact
+            : action === 'allow-tool'
+              ? api.approvals.allowTool
+              : api.approvals.deny
+      const updated = await call(selected.id, totpCode)
+      setSelected(updated)
+      setPending(null)
+      await load(filter)
+      await loadPendingApprovals()
+    } catch (err) {
+      if (isTotpChallengeError(err)) {
+        setPending(action)
+        setTotpOpen(true)
+        return
+      }
+      setDecisionError(describeError(err).message)
+    } finally {
+      setBusy(null)
+    }
+  }
 
-        <div style={{ display: 'flex', gap: 4, marginBottom: 14 }}>
-          {FILTERS.map((option) => {
-            const active = filter === option.key
-            return (
-              <button
-                key={option.key || 'all'}
-                type="button"
-                onClick={() => setFilter(option.key)}
-                aria-pressed={active}
-                style={{
-                  padding: '5px 11px',
-                  fontSize: 12,
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                  border: `1px solid ${active ? 'var(--text)' : 'var(--border)'}`,
-                  background: active ? 'var(--content-bg)' : 'var(--surface)',
-                  color: active ? 'var(--text)' : 'var(--text-dim)',
-                  fontWeight: active ? 600 : 400,
-                }}
-              >
-                {option.label}
-              </button>
-            )
-          })}
+  const columns: Column<ApprovalRequest>[] = [
+    {
+      key: 'tool',
+      header: 'Tool',
+      render: (request) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+          <code className="sutr-mono sutr-table__primary">{request.tool_name}</code>
+          <span className="sutr-meta sutr-truncate" style={{ maxWidth: 380 }}>
+            {request.summary_text}
+          </span>
         </div>
-
-        {error && (
-          <div
-            style={{
-              marginBottom: 14,
-              padding: '8px 12px',
-              borderRadius: 8,
-              fontSize: 12.5,
-              background: 'var(--badge-red-bg)',
-              color: 'var(--badge-red-text)',
-            }}
+      ),
+    },
+    {
+      key: 'integration',
+      header: 'Provider',
+      width: 130,
+      render: (request) => <span className="sutr-mono">{request.integration_id}</span>,
+    },
+    {
+      key: 'requester',
+      header: 'Requested by',
+      width: 180,
+      render: (request) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span>{request.api_key_label ?? request.requested_by_agent ?? 'unknown caller'}</span>
+          <span className="sutr-meta sutr-mono">{request.requester_ip ?? '—'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      width: 170,
+      render: (request) => <SutrStatus domain="approval" value={effectiveStatus(request)} />,
+    },
+    {
+      key: 'requested',
+      header: 'Requested',
+      width: 130,
+      render: (request) => (
+        <span className="sutr-meta" title={formatDateTime(request.requested_at)}>
+          {relativeTime(request.requested_at)}
+        </span>
+      ),
+    },
+    {
+      key: 'expires',
+      header: 'Expires',
+      width: 130,
+      render: (request) =>
+        effectiveStatus(request) === 'pending' ? (
+          <span
+            className="sutr-meta"
+            style={{ color: 'var(--amber)' }}
+            title={formatDateTime(request.expires_at)}
           >
-            {error}
-          </div>
-        )}
-
-        {loading && requests.length === 0 ? (
-          <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-faint)' }}>
-            <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
-          </div>
-        ) : requests.length === 0 ? (
-          <EmptyState filter={filter} />
+            {relativeTime(request.expires_at)}
+          </span>
         ) : (
-          <>
-            <RequestList requests={grouped.live} />
-            {grouped.stale.length > 0 && (
-              <>
-                <div
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 600,
-                    textTransform: 'uppercase',
-                    letterSpacing: 0.6,
-                    color: 'var(--text-faint)',
-                    margin: '18px 0 8px',
-                  }}
-                >
-                  Expired · {grouped.stale.length}
-                </div>
-                <RequestList requests={grouped.stale} muted />
-              </>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
+          <span className="sutr-meta">—</span>
+        ),
+    },
+  ]
 
-function RequestList({ requests, muted }: { requests: ApprovalRequest[]; muted?: boolean }) {
-  if (requests.length === 0) return null
-  return (
-    <div
-      style={{
-        background: 'var(--content-bg)',
-        border: '1px solid var(--border)',
-        borderRadius: 10,
-        overflow: 'hidden',
-        opacity: muted ? 0.65 : 1,
-      }}
-    >
-      {requests.map((request, index) => (
-        <RequestRow key={request.id} request={request} first={index === 0} />
-      ))}
-    </div>
-  )
-}
-
-function RequestRow({ request, first }: { request: ApprovalRequest; first: boolean }) {
-  const status = effectiveStatus(request)
-  const tone = STATUS_TONE[status] ?? STATUS_TONE.expired!
+  const status = selected ? effectiveStatus(selected) : null
   const actionable = status === 'pending'
 
-  let args: Record<string, unknown> = {}
-  try {
-    args = JSON.parse(request.args_json || '{}')
-  } catch {
-    /* keep empty on malformed args */
-  }
-  const argKeys = Object.keys(args)
-
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 12,
-        padding: '12px 16px',
-        borderTop: first ? 'none' : '1px solid var(--border)',
-      }}
-    >
-      <span style={{ marginTop: 2, flexShrink: 0 }}>
-        {status === 'pending' ? (
-          <ShieldQuestion size={16} style={{ color: 'var(--badge-amber-dot)' }} />
-        ) : status === 'denied' ? (
-          <XCircle size={16} style={{ color: 'var(--badge-red-dot)' }} />
-        ) : status === 'expired' ? (
-          <Clock size={16} style={{ color: 'var(--text-faint)' }} />
-        ) : (
-          <CheckCircle2 size={16} style={{ color: 'var(--badge-green-dot)' }} />
-        )}
-      </span>
+    <SutrPage>
+      <SutrPageHeader
+        eyebrow="Operate"
+        title="Approvals"
+        subtitle="Tool calls held for a human decision. An approval authorizes the exact request shown — not the tool, and not the next call."
+      >
+        <SutrTabs
+          ariaLabel="Approval status"
+          value={filter}
+          onChange={setFilter}
+          items={[
+            {
+              value: 'pending',
+              label: 'Pending',
+              count: filter === 'pending' ? live.length : undefined,
+            },
+            { value: 'approved', label: 'Approved' },
+            { value: 'denied', label: 'Denied' },
+            { value: 'all', label: 'All' },
+          ]}
+        />
+      </SutrPageHeader>
 
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: 'var(--text)',
-              fontFamily: 'var(--font-mono)',
-            }}
-          >
-            {request.tool_name}
-          </span>
-          <span style={{ fontSize: 11.5, color: 'var(--text-dim)' }}>{request.integration_id}</span>
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 600,
-              padding: '2px 7px',
-              borderRadius: 999,
-              background: tone.bg,
-              color: tone.text,
-              textTransform: 'uppercase',
-              letterSpacing: 0.4,
-            }}
-          >
-            {status.replace('_', ' ')}
-          </span>
-        </div>
+      <SutrPageBody>
+        {error ? <SutrError what="The approval queue could not be read." why={error} /> : null}
 
-        <div style={{ fontSize: 12.5, color: 'var(--text-dim)', marginTop: 3 }}>
-          {request.summary_text}
-        </div>
-
-        {request.additional_info && (
-          <div
-            style={{
-              fontSize: 12,
-              color: 'var(--text-dim)',
-              marginTop: 5,
-              paddingLeft: 8,
-              borderLeft: '2px solid var(--border-strong)',
-            }}
-          >
-            “{request.additional_info}”
+        {requests === null ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {[0, 1, 2].map((i) => (
+              <span key={i} className="sutr-skeleton" style={{ height: 46 }} />
+            ))}
           </div>
+        ) : (
+          <>
+            <SutrTable
+              columns={columns}
+              rows={live}
+              minWidth={900}
+              rowKey={(request) => request.id}
+              onRowClick={(request) => {
+                setSelected(request)
+                setDecisionError(null)
+              }}
+              caption="Approval requests"
+              empty={
+                <SutrEmpty
+                  icon={filter === 'pending' ? <ShieldQuestion size={17} /> : <Inbox size={17} />}
+                  title={filter === 'pending' ? 'Nothing waiting on you' : 'No approval requests'}
+                  body={
+                    filter === 'pending'
+                      ? 'A request appears here the moment an agent calls a tool whose policy is set to ask. Until someone decides, the call does not execute.'
+                      : 'No requests match this filter.'
+                  }
+                />
+              }
+            />
+
+            {expired.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <SutrSectionLabel>Expired · {expired.length}</SutrSectionLabel>
+                <div style={{ opacity: 0.7 }}>
+                  <SutrTable
+                    columns={columns}
+                    rows={expired}
+                    minWidth={900}
+                    rowKey={(request) => request.id}
+                    onRowClick={(request) => setSelected(request)}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </>
         )}
+      </SutrPageBody>
 
-        <div
-          style={{
-            display: 'flex',
-            gap: 10,
-            flexWrap: 'wrap',
-            fontSize: 11,
-            color: 'var(--text-faint)',
-            marginTop: 6,
-          }}
-        >
-          <span>requested {relative(request.requested_at)}</span>
-          {status === 'pending' && <span>expires {relative(request.expires_at)}</span>}
-          {argKeys.length > 0 && (
-            <span style={{ fontFamily: 'var(--font-mono)' }}>
-              {argKeys.slice(0, 4).join(', ')}
-              {argKeys.length > 4 ? ` +${argKeys.length - 4}` : ''}
-            </span>
-          )}
-          {request.api_key_label && <span>via key “{request.api_key_label}”</span>}
-          {request.requester_ip && <span>{request.requester_ip}</span>}
-        </div>
-      </div>
+      <SutrDrawer
+        open={Boolean(selected)}
+        onClose={() => {
+          setSelected(null)
+          setDecisionError(null)
+        }}
+        wide
+        title={selected ? <code className="sutr-mono">{selected.tool_name}</code> : ''}
+        subtitle={selected ? `${selected.integration_id} · ${selected.summary_text}` : ''}
+        actions={
+          selected ? <SutrStatus domain="approval" value={effectiveStatus(selected)} /> : null
+        }
+        footer={
+          selected && actionable ? (
+            <>
+              <SutrButton
+                variant="danger"
+                loading={busy === 'deny'}
+                onClick={() => void decide('deny')}
+              >
+                Deny
+              </SutrButton>
+              <span style={{ flex: 1 }} />
+              <SutrButton
+                variant="brand"
+                loading={busy === 'approve-once'}
+                onClick={() => void decide('approve-once')}
+              >
+                Approve this request
+              </SutrButton>
+            </>
+          ) : (
+            <Link to={`/approve/${selected?.id ?? ''}`} className="sutr-btn sutr-btn--secondary">
+              Open the full record
+            </Link>
+          )
+        }
+      >
+        {selected ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            {actionable ? (
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 10,
+                  padding: 12,
+                  borderRadius: 'var(--r-sm)',
+                  border: '1px solid var(--brand-border)',
+                  background: 'var(--brand-soft)',
+                }}
+              >
+                <ShieldQuestion
+                  size={15}
+                  style={{ color: 'var(--brand)', flexShrink: 0, marginTop: 1 }}
+                />
+                <span className="sutr-body" style={{ color: 'var(--text)' }}>
+                  Approval applies only to the exact request below. Any change to these arguments
+                  goes back through the gate.
+                </span>
+              </div>
+            ) : null}
 
-      {actionable && (
-        <Link
-          to={`/approve/${request.id}`}
-          style={{
-            flexShrink: 0,
-            display: 'inline-flex',
-            alignItems: 'center',
-            height: 30,
-            padding: '0 12px',
-            borderRadius: 7,
-            background: 'var(--text)',
-            color: 'var(--content-bg)',
-            fontSize: 12.5,
-            fontWeight: 600,
-            textDecoration: 'none',
-          }}
-        >
-          Review
-        </Link>
-      )}
-    </div>
-  )
-}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <SutrSectionLabel>Exact arguments</SutrSectionLabel>
+              <SutrCodeBlock
+                label="arguments"
+                maxHeight={280}
+                code={prettyJson(selected.args_json) || '{}'}
+              />
+              <span className="sutr-meta sutr-mono">hash {selected.args_hash}</span>
+            </div>
 
-function EmptyState({ filter }: { filter: string }) {
-  return (
-    <div
-      style={{
-        border: '1px dashed var(--border-strong)',
-        borderRadius: 10,
-        padding: '48px 20px',
-        textAlign: 'center',
-        color: 'var(--text-dim)',
-      }}
-    >
-      <Inbox size={22} style={{ color: 'var(--text-faint)', marginBottom: 10 }} />
-      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
-        {filter === 'pending' ? 'Nothing waiting on you' : 'No approval requests'}
-      </div>
-      <div style={{ fontSize: 12.5 }}>
-        {filter === 'pending'
-          ? 'Requests appear here when an agent calls a tool that needs approval.'
-          : 'Try a different filter.'}
-      </div>
-    </div>
+            {selected.additional_info ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <SutrSectionLabel>Why the agent says it needs this</SutrSectionLabel>
+                <p
+                  className="sutr-body"
+                  style={{
+                    paddingLeft: 10,
+                    borderLeft: '2px solid var(--border-strong)',
+                    color: 'var(--text)',
+                  }}
+                >
+                  “{selected.additional_info}”
+                </p>
+                <span className="sutr-meta">
+                  Supplied by the caller. Treat it as a claim, not as evidence.
+                </span>
+              </div>
+            ) : null}
+
+            <SutrDefinitionList
+              items={[
+                {
+                  key: 'Requester',
+                  value: selected.api_key_label ?? selected.requested_by_agent ?? 'unknown caller',
+                },
+                {
+                  key: 'API key',
+                  value: selected.api_key_prefix ? (
+                    <code className="sutr-mono">{selected.api_key_prefix}…</code>
+                  ) : (
+                    <span className="sutr-meta">not an API key</span>
+                  ),
+                },
+                {
+                  key: 'IP',
+                  value: <code className="sutr-mono">{selected.requester_ip ?? '—'}</code>,
+                },
+                {
+                  key: 'User agent',
+                  value: (
+                    <span className="sutr-meta" style={{ overflowWrap: 'anywhere' }}>
+                      {selected.user_agent ?? '—'}
+                    </span>
+                  ),
+                },
+                { key: 'Requested', value: formatDateTime(selected.requested_at) },
+                {
+                  key: 'Expires',
+                  value: `${formatDateTime(selected.expires_at)} (${relativeTime(selected.expires_at)})`,
+                },
+                {
+                  key: 'Decision',
+                  value: selected.decided_at ? (
+                    `${selected.decision_mode ?? 'decided'} · ${formatDateTime(selected.decided_at)}`
+                  ) : (
+                    <span className="sutr-meta">not decided</span>
+                  ),
+                },
+              ]}
+            />
+
+            {actionable ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <SutrSectionLabel>Broader grants</SutrSectionLabel>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <SutrButton
+                    variant="secondary"
+                    size="sm"
+                    loading={busy === 'approve-exact'}
+                    onClick={() => void decide('approve-exact')}
+                  >
+                    {DECISION_LABEL['approve-exact']}
+                  </SutrButton>
+                  <SutrButton
+                    variant="secondary"
+                    size="sm"
+                    loading={busy === 'allow-tool'}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Allow every future call to ${selected.tool_name}, whatever the arguments? This changes the tool's policy to auto approve.`,
+                        )
+                      ) {
+                        void decide('allow-tool')
+                      }
+                    }}
+                  >
+                    {DECISION_LABEL['allow-tool']}
+                  </SutrButton>
+                </div>
+                <span className="sutr-meta">
+                  “Always allow these exact arguments” keeps the gate for anything different. “Allow
+                  this tool” removes the gate entirely.
+                </span>
+              </div>
+            ) : null}
+
+            {decisionError ? (
+              <SutrError
+                what="The decision was not recorded."
+                why={decisionError}
+                meta={{ request: selected.id }}
+              />
+            ) : null}
+          </div>
+        ) : null}
+      </SutrDrawer>
+
+      <TotpCodeDialog
+        open={totpOpen}
+        title="Confirm decision"
+        description={
+          pending
+            ? `Enter your authenticator code to ${DECISION_LABEL[pending].toLowerCase()}.`
+            : 'Enter your authenticator code to continue.'
+        }
+        confirmLabel="Confirm"
+        onClose={() => {
+          setTotpOpen(false)
+          setPending(null)
+        }}
+        onSubmit={async (code) => {
+          if (pending) await decide(pending, code)
+        }}
+      />
+    </SutrPage>
   )
 }

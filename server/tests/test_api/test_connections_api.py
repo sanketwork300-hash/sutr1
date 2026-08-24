@@ -186,7 +186,7 @@ async def test_redirect_after_cannot_leave_the_ui_origin(client, session, monkey
     resp = await client.get(
         "/api/connections/github/callback", params={"state": state, "code": "abc"}
     )
-    assert resp.headers["location"].startswith("https://app.sutr.example.com/settings?")
+    assert resp.headers["location"].startswith("https://app.sutr.example.com/app/credentials?")
 
 
 async def test_protocol_relative_redirect_after_is_discarded(client, session, monkeypatch):
@@ -198,7 +198,7 @@ async def test_protocol_relative_redirect_after_is_discarded(client, session, mo
     resp = await client.get(
         "/api/connections/github/callback", params={"state": state, "code": "abc"}
     )
-    assert resp.headers["location"].startswith("https://app.sutr.example.com/settings?")
+    assert resp.headers["location"].startswith("https://app.sutr.example.com/app/credentials?")
 
 
 # ── AWS polling ──────────────────────────────────────────────────────────────

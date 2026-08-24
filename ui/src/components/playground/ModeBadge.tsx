@@ -12,7 +12,7 @@ export function ModeBadge({ mode, integrationName }: ModeBadgeProps) {
 
   return (
     <Link
-      to={`/integrations/${integrationName}`}
+      to={`/app/integrations/${integrationName}`}
       title="Change in integration settings"
       style={{
         display: 'inline-flex',

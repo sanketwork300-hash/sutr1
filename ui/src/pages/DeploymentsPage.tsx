@@ -1,66 +1,83 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  FileText,
-  Loader2,
-  Play,
-  Plus,
-  RefreshCw,
-  Rocket,
-  Square,
-  Trash2,
-} from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { useSearchParams } from 'react-router-dom'
+import { ExternalLink, FileText, Play, Plus, RefreshCw, Rocket, Square, Trash2 } from 'lucide-react'
 import {
   api,
   type Deployment,
   type DeploymentProviderInfo,
   type OpenApiProject,
 } from '@/api/client'
+import { DeployStep } from '@/components/mcp-builder/DeployStep'
+import { formatDateTime, relativeTime } from '@/lib/format'
+import {
+  SutrBadge,
+  SutrButton,
+  SutrCodeBlock,
+  SutrDefinitionList,
+  SutrDrawer,
+  SutrEmpty,
+  SutrEndpoint,
+  SutrError,
+  SutrExternalButton,
+  SutrModal,
+  SutrPage,
+  SutrPageBody,
+  SutrPageHeader,
+  SutrSectionLabel,
+  SutrSelect,
+  SutrStatus,
+  SutrTable,
+  describeError,
+  type Column,
+} from '@/components/sutr'
 
-const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
-  running: { bg: 'var(--badge-green-bg, #e6f6ec)', text: 'var(--badge-green-text, #1a7f37)' },
-  building: { bg: 'var(--badge-yellow-bg, #fff8e1)', text: 'var(--badge-yellow-text, #9a6700)' },
-  queued: { bg: 'var(--badge-yellow-bg, #fff8e1)', text: 'var(--badge-yellow-text, #9a6700)' },
-  stopped: { bg: 'var(--surface)', text: 'var(--text-dim)' },
-  failed: { bg: 'var(--badge-red-bg, #ffebe9)', text: 'var(--badge-red-text, #cf222e)' },
-}
+const TRANSITIONAL = new Set(['queued', 'building', 'deploying'])
 
+/**
+ * The infrastructure view of generated MCP servers: what is running, where,
+ * and on whose authority. Status is whatever the provider last reported —
+ * "RUNNING" is never inferred from a successful create call.
+ */
 export default function DeploymentsPage() {
-  const [deployments, setDeployments] = useState<Deployment[]>([])
+  const [params, setParams] = useSearchParams()
+  const [deployments, setDeployments] = useState<Deployment[] | null>(null)
   const [providers, setProviders] = useState<DeploymentProviderInfo[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [logsFor, setLogsFor] = useState<Deployment | null>(null)
-  const [busy, setBusy] = useState<string | null>(null)
+  const [logs, setLogs] = useState<string>('')
+  const [logsLoading, setLogsLoading] = useState(false)
   const pollRef = useRef<number | null>(null)
 
   const refresh = useCallback(async () => {
     try {
       const rows = await api.deployments.list()
       setDeployments(rows)
-      setError('')
+      setError(null)
       return rows
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load deployments')
+    } catch (err) {
+      setError(describeError(err).message)
+      setDeployments([])
       return []
     }
   }, [])
 
   useEffect(() => {
-    Promise.all([refresh(), api.deployments.providers().then(setProviders)]).finally(() =>
-      setLoading(false),
-    )
+    void refresh()
+    api.deployments
+      .providers()
+      .then(setProviders)
+      .catch(() => setProviders([]))
   }, [refresh])
 
-  // Poll while anything is queued/building so the status pill flips on its own.
+  // Poll while anything is mid-transition so the status changes on its own.
   useEffect(() => {
-    const active = deployments.some((d) => d.status === 'queued' || d.status === 'building')
-    if (active && pollRef.current === null) {
-      pollRef.current = window.setInterval(refresh, 3000)
+    const moving = (deployments ?? []).some((d) => TRANSITIONAL.has(d.status))
+    if (moving && pollRef.current === null) {
+      pollRef.current = window.setInterval(() => void refresh(), 3000)
     }
-    if (!active && pollRef.current !== null) {
+    if (!moving && pollRef.current !== null) {
       window.clearInterval(pollRef.current)
       pollRef.current = null
     }
@@ -72,483 +89,489 @@ export default function DeploymentsPage() {
     }
   }, [deployments, refresh])
 
-  async function act(id: string, action: 'start' | 'stop' | 'delete') {
-    setBusy(id)
-    setError('')
+  const selectedId = params.get('deployment')
+  const selected = (deployments ?? []).find((d) => d.id === selectedId) ?? null
+
+  function openDetail(deployment: Deployment) {
+    params.set('deployment', deployment.id)
+    setParams(params, { replace: true })
+  }
+
+  function closeDetail() {
+    if (params.get('deployment')) {
+      params.delete('deployment')
+      setParams(params, { replace: true })
+    }
+  }
+
+  async function act(deployment: Deployment, action: 'start' | 'stop' | 'delete') {
+    setBusy(deployment.id)
+    setError(null)
     try {
       if (action === 'delete') {
-        await api.deployments.remove(id)
+        await api.deployments.remove(deployment.id)
+        closeDetail()
       } else {
-        await api.deployments[action](id)
+        await api.deployments[action](deployment.id)
       }
       await refresh()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : `Failed to ${action}`)
+    } catch (err) {
+      setError(describeError(err).message)
     } finally {
       setBusy(null)
     }
   }
 
-  const dockerProvider = providers.find((p) => p.id === 'docker')
+  const loadLogs = useCallback(async (deployment: Deployment) => {
+    setLogsLoading(true)
+    try {
+      const result = await api.deployments.logs(deployment.id)
+      setLogs(result.logs || '(the container has produced no output yet)')
+    } catch (err) {
+      setLogs(describeError(err).message)
+    } finally {
+      setLogsLoading(false)
+    }
+  }, [])
 
-  return (
-    <div style={{ flex: 1, overflow: 'auto', background: 'var(--bg)', padding: '28px 24px 80px' }}>
-      <div style={{ maxWidth: 860, margin: '0 auto' }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginBottom: 18,
-          }}
-        >
-          <div>
-            <h1 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--text)' }}>
-              Deployments
-            </h1>
-            <p style={{ margin: '3px 0 0', fontSize: 12.5, color: 'var(--text-dim)' }}>
-              Generated MCP servers running on your infrastructure.
-            </p>
-          </div>
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus size={14} style={{ marginRight: 5 }} /> New deployment
-          </Button>
+  useEffect(() => {
+    if (logsFor) void loadLogs(logsFor)
+  }, [logsFor, loadLogs])
+
+  const localProvider = providers.find((p) => p.id === 'docker')
+
+  const columns: Column<Deployment>[] = [
+    {
+      key: 'name',
+      header: 'Deployment',
+      render: (deployment) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+          <span className="sutr-table__primary">{deployment.name}</span>
+          <span className="sutr-meta sutr-mono">{deployment.slug}</span>
         </div>
-
-        {dockerProvider && !dockerProvider.enabled && (
-          <Banner tone="warn">{dockerProvider.reason}</Banner>
-        )}
-        {error && <Banner tone="error">{error}</Banner>}
-
-        {loading ? (
-          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-faint)' }}>
-            <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
-          </div>
-        ) : deployments.length === 0 ? (
-          <EmptyState onCreate={() => setCreateOpen(true)} />
+      ),
+    },
+    {
+      key: 'provider',
+      header: 'Provider',
+      width: 120,
+      render: (deployment) => <span className="sutr-mono">{deployment.provider}</span>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      width: 140,
+      render: (deployment) => (
+        <SutrStatus
+          domain="deployment"
+          value={deployment.status}
+          title={deployment.error ?? undefined}
+        />
+      ),
+    },
+    {
+      key: 'tools',
+      header: 'Tools',
+      numeric: true,
+      width: 80,
+      render: (deployment) => deployment.tool_count,
+    },
+    {
+      key: 'endpoint',
+      header: 'Endpoint',
+      render: (deployment) =>
+        deployment.url ? (
+          <span className="sutr-mono sutr-truncate" style={{ maxWidth: 280, display: 'block' }}>
+            {deployment.url}
+          </span>
+        ) : deployment.status === 'failed' ? (
+          <span className="sutr-meta" style={{ color: 'var(--red)' }}>
+            {deployment.error ?? 'failed'}
+          </span>
         ) : (
-          <div
-            style={{
-              background: 'var(--content-bg)',
-              border: '1px solid var(--border)',
-              borderRadius: 10,
-              overflow: 'hidden',
+          <span className="sutr-meta">not exposed yet</span>
+        ),
+    },
+    {
+      key: 'created',
+      header: 'Created',
+      width: 130,
+      render: (deployment) => (
+        <span className="sutr-meta" title={formatDateTime(deployment.created_at)}>
+          {relativeTime(deployment.created_at)}
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      width: 130,
+      render: (deployment) => (
+        <div className="sutr-table__actions">
+          <SutrButton
+            variant="ghost"
+            size="sm"
+            iconOnly
+            title="Logs"
+            aria-label={`Logs for ${deployment.name}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              setLogsFor(deployment)
             }}
           >
-            {deployments.map((d, i) => (
-              <div
-                key={d.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  padding: '12px 16px',
-                  borderTop: i > 0 ? '1px solid var(--border)' : 'none',
-                }}
-              >
-                <Rocket size={16} style={{ color: 'var(--text-faint)', flexShrink: 0 }} />
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>
-                      {d.name}
-                    </span>
-                    <StatusPill status={d.status} />
-                    <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
-                      {d.tool_count} tool{d.tool_count === 1 ? '' : 's'} · {d.provider}
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 11.5,
-                      fontFamily: 'var(--font-mono)',
-                      color: d.status === 'failed' ? 'var(--red, #cf222e)' : 'var(--text-dim)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      marginTop: 2,
-                    }}
-                  >
-                    {d.status === 'failed' ? (d.error ?? 'failed') : (d.url ?? '…')}
-                  </div>
-                </div>
+            <FileText size={13} />
+          </SutrButton>
+          {deployment.status === 'running' ? (
+            <SutrButton
+              variant="ghost"
+              size="sm"
+              iconOnly
+              title="Stop"
+              aria-label={`Stop ${deployment.name}`}
+              loading={busy === deployment.id}
+              onClick={(e) => {
+                e.stopPropagation()
+                void act(deployment, 'stop')
+              }}
+            >
+              <Square size={13} />
+            </SutrButton>
+          ) : deployment.status === 'stopped' ? (
+            <SutrButton
+              variant="ghost"
+              size="sm"
+              iconOnly
+              title="Start"
+              aria-label={`Start ${deployment.name}`}
+              loading={busy === deployment.id}
+              onClick={(e) => {
+                e.stopPropagation()
+                void act(deployment, 'start')
+              }}
+            >
+              <Play size={13} />
+            </SutrButton>
+          ) : null}
+        </div>
+      ),
+    },
+  ]
 
-                <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                  {busy === d.id ? (
-                    <Loader2
-                      size={14}
-                      style={{ animation: 'spin 1s linear infinite', color: 'var(--text-faint)' }}
-                    />
-                  ) : (
-                    <>
-                      <IconButton
-                        title="Logs"
-                        onClick={() => setLogsFor(d)}
-                        icon={<FileText size={13} />}
-                      />
-                      {d.status === 'running' ? (
-                        <IconButton
-                          title="Stop"
-                          onClick={() => act(d.id, 'stop')}
-                          icon={<Square size={13} />}
-                        />
-                      ) : d.status === 'stopped' ? (
-                        <IconButton
-                          title="Start"
-                          onClick={() => act(d.id, 'start')}
-                          icon={<Play size={13} />}
-                        />
-                      ) : null}
-                      <IconButton
-                        title="Delete"
-                        onClick={() => {
-                          if (window.confirm(`Delete deployment '${d.name}'?`)) {
-                            act(d.id, 'delete')
-                          }
-                        }}
-                        icon={<Trash2 size={13} />}
-                        danger
-                      />
-                    </>
-                  )}
-                </div>
-              </div>
+  return (
+    <SutrPage>
+      <SutrPageHeader
+        eyebrow="Operate"
+        title="Deployments"
+        subtitle="Generated MCP servers, the provider each one runs on, and the endpoint agents reach it at."
+        actions={
+          <>
+            <SutrButton variant="secondary" size="sm" onClick={() => void refresh()}>
+              <RefreshCw size={13} /> Refresh
+            </SutrButton>
+            <SutrButton variant="brand" size="sm" onClick={() => setCreateOpen(true)}>
+              <Plus size={13} /> New deployment
+            </SutrButton>
+          </>
+        }
+      />
+
+      <SutrPageBody>
+        {localProvider && !localProvider.enabled && localProvider.reason ? (
+          <SutrError
+            what="The local Docker provider is not available on this instance."
+            why={localProvider.reason}
+            meta={{ provider: 'docker' }}
+          />
+        ) : null}
+
+        {error ? <SutrError what="That deployment action did not complete." why={error} /> : null}
+
+        {deployments === null ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {[0, 1, 2].map((i) => (
+              <span key={i} className="sutr-skeleton" style={{ height: 46 }} />
             ))}
           </div>
+        ) : (
+          <SutrTable
+            columns={columns}
+            rows={deployments}
+            minWidth={940}
+            rowKey={(deployment) => deployment.id}
+            onRowClick={openDetail}
+            caption="Deployments"
+            empty={
+              <SutrEmpty
+                icon={<Rocket size={17} />}
+                title="No deployments yet"
+                body="Compile an OpenAPI specification into tools, then run it as a standalone MCP server — on this host, or in your own cloud account."
+                action={
+                  <SutrButton variant="brand" size="sm" onClick={() => setCreateOpen(true)}>
+                    Create the first deployment
+                  </SutrButton>
+                }
+              />
+            }
+          />
         )}
-      </div>
+      </SutrPageBody>
 
-      <CreateDeploymentDialog
+      <DeploymentDetail
+        deployment={selected}
+        busy={busy === selected?.id}
+        onClose={closeDetail}
+        onLogs={() => selected && setLogsFor(selected)}
+        onAct={(action) => selected && act(selected, action)}
+      />
+
+      <NewDeploymentModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onCreated={() => {
+        onDeployed={() => {
           setCreateOpen(false)
-          refresh()
+          void refresh()
         }}
       />
-      <LogsDialog deployment={logsFor} onClose={() => setLogsFor(null)} />
-    </div>
+
+      <SutrModal
+        open={Boolean(logsFor)}
+        onClose={() => setLogsFor(null)}
+        wide
+        title={`Logs — ${logsFor?.name ?? ''}`}
+        description="Container output as the provider reports it."
+        footer={
+          <SutrButton
+            variant="secondary"
+            loading={logsLoading}
+            onClick={() => logsFor && void loadLogs(logsFor)}
+          >
+            <RefreshCw size={13} /> Refresh
+          </SutrButton>
+        }
+      >
+        <SutrCodeBlock
+          label="stdout / stderr"
+          copyable={false}
+          maxHeight={420}
+          code={logsLoading ? 'Reading logs…' : logs}
+        />
+      </SutrModal>
+    </SutrPage>
   )
 }
 
-function CreateDeploymentDialog({
+function DeploymentDetail({
+  deployment,
+  busy,
+  onClose,
+  onLogs,
+  onAct,
+}: {
+  deployment: Deployment | null
+  busy: boolean
+  onClose: () => void
+  onLogs: () => void
+  onAct: (action: 'start' | 'stop' | 'delete') => void
+}) {
+  if (!deployment) return null
+
+  const config = Object.entries(deployment.config ?? {})
+
+  return (
+    <SutrDrawer
+      open
+      onClose={onClose}
+      wide
+      title={deployment.name}
+      subtitle={`${deployment.provider} · ${deployment.tool_count} tool${deployment.tool_count === 1 ? '' : 's'}`}
+      actions={<SutrStatus domain="deployment" value={deployment.status} />}
+      footer={
+        <>
+          <SutrButton
+            variant="danger"
+            size="sm"
+            loading={busy}
+            onClick={() => {
+              if (
+                window.confirm(
+                  `Delete deployment “${deployment.name}”? This tears down the running container.`,
+                )
+              ) {
+                onAct('delete')
+              }
+            }}
+          >
+            <Trash2 size={13} /> Delete
+          </SutrButton>
+          <span style={{ flex: 1 }} />
+          <SutrButton variant="secondary" size="sm" onClick={onLogs}>
+            <FileText size={13} /> View logs
+          </SutrButton>
+          {deployment.status === 'running' ? (
+            <SutrButton variant="secondary" size="sm" loading={busy} onClick={() => onAct('stop')}>
+              <Square size={13} /> Stop
+            </SutrButton>
+          ) : deployment.status === 'stopped' ? (
+            <SutrButton variant="brand" size="sm" loading={busy} onClick={() => onAct('start')}>
+              <Play size={13} /> Start
+            </SutrButton>
+          ) : null}
+        </>
+      }
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        {deployment.status === 'failed' && deployment.error ? (
+          <SutrError
+            what="This deployment failed."
+            why={deployment.error}
+            meta={{ provider: deployment.provider, deployment: deployment.id }}
+            action={
+              <SutrButton variant="secondary" size="sm" onClick={onLogs}>
+                View logs
+              </SutrButton>
+            }
+          />
+        ) : null}
+
+        {deployment.url ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <SutrEndpoint url={deployment.url} label="MCP endpoint" />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <SutrExternalButton href={deployment.url} variant="brand" size="sm">
+                Open MCP endpoint <ExternalLink size={12} />
+              </SutrExternalButton>
+              {deployment.console_url ? (
+                <SutrExternalButton href={deployment.console_url} variant="secondary" size="sm">
+                  Provider console <ExternalLink size={12} />
+                </SutrExternalButton>
+              ) : null}
+            </div>
+          </div>
+        ) : (
+          <p className="sutr-meta">
+            No endpoint yet. One appears once the provider reports the service as reachable.
+          </p>
+        )}
+
+        <SutrDefinitionList
+          items={[
+            { key: 'Deployment ID', value: <code className="sutr-mono">{deployment.id}</code> },
+            { key: 'Slug', value: <code className="sutr-mono">{deployment.slug}</code> },
+            { key: 'Provider', value: <code className="sutr-mono">{deployment.provider}</code> },
+            {
+              key: 'Health check',
+              value: deployment.health_url ? (
+                <code className="sutr-mono" style={{ overflowWrap: 'anywhere' }}>
+                  {deployment.health_url}
+                </code>
+              ) : (
+                <span className="sutr-meta">not published by this provider</span>
+              ),
+            },
+            {
+              key: 'Runtime token',
+              value: deployment.has_token ? (
+                <SutrBadge tone="success" plain>
+                  injected as {deployment.env_var ?? 'an environment variable'}
+                </SutrBadge>
+              ) : (
+                <span className="sutr-meta">none — the upstream needs no credential</span>
+              ),
+            },
+            { key: 'Created', value: formatDateTime(deployment.created_at) },
+            {
+              key: 'Updated',
+              value: `${formatDateTime(deployment.updated_at)} (${relativeTime(deployment.updated_at)})`,
+            },
+          ]}
+        />
+
+        {config.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <SutrSectionLabel>Placement</SutrSectionLabel>
+            <SutrDefinitionList
+              items={config.map(([key, value]) => ({
+                key,
+                value: <code className="sutr-mono">{value}</code>,
+              }))}
+            />
+          </div>
+        ) : null}
+      </div>
+    </SutrDrawer>
+  )
+}
+
+/**
+ * Deploying from here reuses the builder's deploy stage, so the provider list,
+ * the fields each provider needs and the credential flow are identical — and
+ * still come from the server's provider registry.
+ */
+function NewDeploymentModal({
   open,
   onClose,
-  onCreated,
+  onDeployed,
 }: {
   open: boolean
   onClose: () => void
-  onCreated: () => void
+  onDeployed: () => void
 }) {
-  const [projects, setProjects] = useState<OpenApiProject[]>([])
+  const [projects, setProjects] = useState<OpenApiProject[] | null>(null)
   const [projectId, setProjectId] = useState('')
-  const [name, setName] = useState('')
-  const [token, setToken] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (open) {
-      api.openapi.list().then((rows) => {
+    if (!open) return
+    api.openapi
+      .list()
+      .then((rows) => {
         setProjects(rows)
-        if (rows.length > 0 && !projectId) setProjectId(rows[0].id)
+        if (rows.length > 0) setProjectId((current) => current || rows[0].id)
       })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      .catch((err) => setError(describeError(err).message))
   }, [open])
 
-  async function submit(e: { preventDefault: () => void }) {
-    e.preventDefault()
-    if (!projectId) {
-      setError('Import an OpenAPI project first (Integrations → New → OpenAPI spec)')
-      return
-    }
-    if (!name.trim()) {
-      setError('Give the deployment a name')
-      return
-    }
-    setSaving(true)
-    setError('')
-    try {
-      await api.deployments.create({
-        project_id: projectId,
-        name: name.trim(),
-        provider: 'docker',
-        token: token || null,
-      })
-      setName('')
-      setToken('')
-      onCreated()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create deployment')
-    } finally {
-      setSaving(false)
-    }
-  }
+  const project = (projects ?? []).find((p) => p.id === projectId) ?? null
 
   return (
-    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="sm:max-w-[480px]">
-        <DialogHeader>
-          <DialogTitle>New deployment</DialogTitle>
-          <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-dim)' }}>
-            Runs a generated MCP server as a local Docker container, bound to 127.0.0.1.
-          </p>
-        </DialogHeader>
-        <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <label style={fieldLabelStyle}>
-            OpenAPI project
-            <select
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
-              style={inputStyle}
-            >
-              {projects.length === 0 && <option value="">No projects imported yet</option>}
-              {projects.map((p) => (
+    <SutrModal
+      open={open}
+      onClose={onClose}
+      wide
+      title="New deployment"
+      description="Choose an imported specification, then pick where it runs. Every operation in the specification is compiled unless you narrow the selection in the builder."
+    >
+      {error ? <SutrError what="Specifications could not be listed." why={error} /> : null}
+
+      {projects !== null && projects.length === 0 ? (
+        <SutrEmpty
+          title="No specifications imported"
+          body="A deployment is built from an OpenAPI project. Import one first — the builder walks through it stage by stage."
+        />
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <span className="sutr-field__label">Specification</span>
+            <SutrSelect value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+              {(projects ?? []).map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name} ({p.operation_count} ops)
+                  {p.api_title || p.name} · {p.operation_count} operations
                 </option>
               ))}
-            </select>
+            </SutrSelect>
           </label>
-          <label style={fieldLabelStyle}>
-            Name
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Petstore prod"
-              style={inputStyle}
+
+          {project ? (
+            <DeployStep
+              project={project}
+              compileBody={() => ({})}
+              suggestedName={project.api_title || project.name}
+              onBack={onClose}
+              onOpenDeployments={onDeployed}
             />
-          </label>
-          <label style={fieldLabelStyle}>
-            Upstream API token (optional)
-            <input
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Injected as an env var at runtime"
-              autoComplete="off"
-              style={{ ...inputStyle, fontFamily: 'var(--font-mono)', fontSize: 12.5 }}
-            />
-          </label>
-          {error && (
-            <div style={{ fontSize: 12, color: 'var(--badge-red-text, #cf222e)' }}>{error}</div>
-          )}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={saving}>
-              Cancel
-            </Button>
-            <Button type="submit" size="sm" disabled={saving}>
-              {saving ? (
-                <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
-              ) : (
-                'Deploy'
-              )}
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+          ) : null}
+        </div>
+      )}
+    </SutrModal>
   )
-}
-
-function LogsDialog({
-  deployment,
-  onClose,
-}: {
-  deployment: Deployment | null
-  onClose: () => void
-}) {
-  const [logs, setLogs] = useState('')
-  const [loading, setLoading] = useState(false)
-
-  const load = useCallback(async () => {
-    if (!deployment) return
-    setLoading(true)
-    try {
-      const result = await api.deployments.logs(deployment.id)
-      setLogs(result.logs || '(no output yet)')
-    } catch (e) {
-      setLogs(e instanceof Error ? e.message : 'Failed to fetch logs')
-    } finally {
-      setLoading(false)
-    }
-  }, [deployment])
-
-  useEffect(() => {
-    if (deployment) load()
-  }, [deployment, load])
-
-  return (
-    <Dialog open={deployment !== null} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="sm:max-w-[720px]">
-        <DialogHeader>
-          <DialogTitle>
-            Logs — {deployment?.name}
-            <button onClick={load} title="Refresh" style={refreshBtnStyle} disabled={loading}>
-              <RefreshCw size={12} />
-            </button>
-          </DialogTitle>
-        </DialogHeader>
-        <pre
-          style={{
-            margin: 0,
-            padding: 12,
-            maxHeight: 420,
-            overflow: 'auto',
-            background: 'var(--code-bg)',
-            color: 'var(--code-text)',
-            borderRadius: 8,
-            fontSize: 11.5,
-            fontFamily: 'var(--font-mono)',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-          }}
-        >
-          {loading ? 'Loading…' : logs}
-        </pre>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function StatusPill({ status }: { status: string }) {
-  const colors = STATUS_COLORS[status] ?? STATUS_COLORS.stopped
-  return (
-    <span
-      style={{
-        fontSize: 10.5,
-        fontWeight: 600,
-        padding: '2px 8px',
-        borderRadius: 999,
-        background: colors.bg,
-        color: colors.text,
-        textTransform: 'uppercase',
-        letterSpacing: 0.4,
-      }}
-    >
-      {status}
-    </span>
-  )
-}
-
-function IconButton({
-  title,
-  onClick,
-  icon,
-  danger,
-}: {
-  title: string
-  onClick: () => void
-  icon: React.ReactNode
-  danger?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      style={{
-        width: 28,
-        height: 28,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        border: '1px solid var(--border)',
-        borderRadius: 6,
-        background: 'var(--surface)',
-        color: danger ? 'var(--badge-red-text, #cf222e)' : 'var(--text-dim)',
-        cursor: 'pointer',
-      }}
-    >
-      {icon}
-    </button>
-  )
-}
-
-function EmptyState({ onCreate }: { onCreate: () => void }) {
-  return (
-    <div
-      style={{
-        border: '1px dashed var(--border-strong)',
-        borderRadius: 10,
-        padding: '48px 20px',
-        textAlign: 'center',
-        color: 'var(--text-dim)',
-      }}
-    >
-      <Rocket size={22} style={{ color: 'var(--text-faint)', marginBottom: 10 }} />
-      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
-        No deployments yet
-      </div>
-      <div style={{ fontSize: 12.5, marginBottom: 16 }}>
-        Import an OpenAPI spec, then deploy it as a running MCP server.
-      </div>
-      <Button size="sm" onClick={onCreate}>
-        <Plus size={14} style={{ marginRight: 5 }} /> New deployment
-      </Button>
-    </div>
-  )
-}
-
-function Banner({ tone, children }: { tone: 'warn' | 'error'; children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        marginBottom: 14,
-        padding: '8px 12px',
-        borderRadius: 8,
-        fontSize: 12.5,
-        background:
-          tone === 'error' ? 'var(--badge-red-bg, #ffebe9)' : 'var(--badge-yellow-bg, #fff8e1)',
-        color:
-          tone === 'error'
-            ? 'var(--badge-red-text, #cf222e)'
-            : 'var(--badge-yellow-text, #9a6700)',
-      }}
-    >
-      {children}
-    </div>
-  )
-}
-
-const fieldLabelStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 5,
-  fontSize: 11,
-  fontWeight: 700,
-  color: 'var(--text)',
-  textTransform: 'uppercase',
-  letterSpacing: 0.5,
-}
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  height: 34,
-  border: '1px solid var(--border)',
-  borderRadius: 7,
-  background: 'var(--input-bg)',
-  color: 'var(--text)',
-  fontSize: 13,
-  fontFamily: 'inherit',
-  fontWeight: 400,
-  textTransform: 'none',
-  letterSpacing: 0,
-  outline: 'none',
-  padding: '0 10px',
-}
-
-const refreshBtnStyle: React.CSSProperties = {
-  marginLeft: 8,
-  width: 22,
-  height: 22,
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  border: '1px solid var(--border)',
-  borderRadius: 5,
-  background: 'var(--surface)',
-  color: 'var(--text-dim)',
-  cursor: 'pointer',
-  verticalAlign: 'middle',
 }

@@ -197,7 +197,7 @@ export default function CustomApiBuilderPage() {
     if (dirty) {
       await saveCustomApi({ applyResponse: false, reportError: false }).catch(() => {})
     }
-    navigate('/integrations')
+    navigate('/app/integrations')
   }
 
   async function handleInstall() {
@@ -221,7 +221,7 @@ export default function CustomApiBuilderPage() {
           token: authMethod === 'token' ? testToken : undefined,
         })
         setTestToken('')
-        navigate(`/integrations/${encodeURIComponent(saved.integration_id)}`, { replace: true })
+        navigate(`/app/integrations/${encodeURIComponent(saved.integration_id)}`, { replace: true })
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save custom API')

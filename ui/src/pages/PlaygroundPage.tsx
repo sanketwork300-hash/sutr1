@@ -1,32 +1,51 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Link } from 'react-router-dom'
-import { ChevronDown, Loader2, Play, X } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { useSearchParams } from 'react-router-dom'
+import { Play, Plug, X } from 'lucide-react'
+import './playground.css'
 import { api, type InstalledIntegration, type Tool } from '@/api/client'
 import { useConnectionsStore } from '@/stores/connections'
-import { IntegrationSelector } from '@/components/playground/IntegrationSelector'
-import { ToolSelector } from '@/components/playground/ToolSelector'
 import { ModeControl } from '@/components/playground/ModeControl'
 import { SchemaForm } from '@/components/playground/SchemaForm'
 import { ResponsePanel, type PlaygroundResult } from '@/components/playground/ResponsePanel'
 import ApprovePage from '@/pages/ApprovePage'
 import { useIsMobile } from '@/lib/useMediaQuery'
+import {
+  SutrBadge,
+  SutrButton,
+  SutrEmpty,
+  SutrKbd,
+  SutrLinkButton,
+  SutrPageHeader,
+  SutrSearchInput,
+  SutrSegmented,
+  SutrSelect,
+  SutrSpinner,
+} from '@/components/sutr'
 
+/**
+ * A developer console, not a form: choose a tool on the left, shape its
+ * arguments in the middle, read the execution on the right — status, latency
+ * and the raw result the provider returned.
+ *
+ * The execution path is unchanged: the same `/api/tools/{id}/call` endpoint,
+ * the same approval gate, the same embedded approval drawer when a tool's
+ * policy asks for a human.
+ */
 export default function PlaygroundPage() {
   const { installed, integrations, fetchInstalled, fetchIntegrations } = useConnectionsStore()
   const isMobile = useIsMobile()
-  const sidePad = isMobile ? 14 : 20
+  const [params, setParams] = useSearchParams()
 
   const [selectedIntegration, setSelectedIntegration] = useState<InstalledIntegration | null>(null)
   const [tools, setTools] = useState<Tool[]>([])
   const [toolsLoading, setToolsLoading] = useState(false)
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null)
+  const [toolQuery, setToolQuery] = useState('')
 
   const [fieldValues, setFieldValues] = useState<Record<string, unknown>>({})
   const [rawMode, setRawMode] = useState(false)
   const [rawJson, setRawJson] = useState('{}')
-  const [paramsOpen, setParamsOpen] = useState(false)
 
   const [running, setRunning] = useState(false)
   const [awaitingApproval, setAwaitingApproval] = useState(false)
@@ -42,14 +61,18 @@ export default function PlaygroundPage() {
   useEffect(() => {
     if (installed.length === 0) fetchInstalled()
     if (integrations.length === 0) fetchIntegrations()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Auto-select first integration once the list loads
+  // A deep link from the tool catalog wins over "first installed integration".
   useEffect(() => {
-    if (installed.length > 0 && !selectedIntegration) {
-      setSelectedIntegration(installed[0])
-    }
-  }, [installed])
+    if (installed.length === 0 || selectedIntegration) return
+    const requested = params.get('integration')
+    const match = requested
+      ? installed.find((entry) => entry.integration_id === requested)
+      : undefined
+    setSelectedIntegration(match ?? installed[0])
+  }, [installed, params, selectedIntegration])
 
   useEffect(() => {
     if (!selectedIntegration) {
@@ -63,14 +86,17 @@ export default function PlaygroundPage() {
     setRawMode(false)
     setResult(null)
     setDurationMs(null)
+    const requestedTool = params.get('tool')
     api.tools
       .listForIntegration(selectedIntegration.integration_id)
       .then((fetched) => {
         setTools(fetched)
-        if (fetched.length > 0) setSelectedTool(fetched[0])
+        const target = requestedTool ? fetched.find((t) => t.name === requestedTool) : undefined
+        if (target ?? fetched[0]) setSelectedTool(target ?? fetched[0])
       })
       .catch(() => setTools([]))
       .finally(() => setToolsLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIntegration?.integration_id])
 
   useEffect(() => {
@@ -80,29 +106,30 @@ export default function PlaygroundPage() {
     setRawMode(false)
     setResult(null)
     setDurationMs(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTool?.name])
 
-  // Auto-poll when awaiting approval
+  // Poll while an approval is outstanding, then re-issue the identical call.
   useEffect(() => {
     if (!awaitingApproval || !approvalRequestId) return
     const interval = setInterval(async () => {
       try {
-        const req = await api.approvals.get(approvalRequestId)
-        if (req.status === 'approved' || req.status === 'consumed') {
+        const request = await api.approvals.get(approvalRequestId)
+        if (request.status === 'approved' || request.status === 'consumed') {
           clearInterval(interval)
           setAwaitingApproval(false)
           setDrawerOpen(false)
           await doCallRef.current(lastArgsRef.current)
-        } else if (req.status === 'denied' || req.status === 'expired') {
+        } else if (request.status === 'denied' || request.status === 'expired') {
           clearInterval(interval)
           setAwaitingApproval(false)
           setResult({
             status: 'denied',
-            data: { error: 'denied', message: `Approval request was ${req.status}.` },
+            data: { error: 'denied', message: `The approval request was ${request.status}.` },
           })
         }
       } catch {
-        // transient errors — keep polling
+        // Transient failures are expected while a decision is outstanding.
       }
     }, 2000)
     return () => clearInterval(interval)
@@ -111,11 +138,11 @@ export default function PlaygroundPage() {
   function initFieldValues(tool: Tool): Record<string, unknown> {
     const props =
       (tool.inputSchema?.properties as Record<string, { type?: string }> | undefined) ?? {}
-    const vals: Record<string, unknown> = {}
+    const values: Record<string, unknown> = {}
     for (const [key, prop] of Object.entries(props)) {
-      vals[key] = prop.type === 'boolean' ? false : ''
+      values[key] = prop.type === 'boolean' ? false : ''
     }
-    return vals
+    return values
   }
 
   function buildArgs(): Record<string, unknown> | null {
@@ -135,8 +162,8 @@ export default function PlaygroundPage() {
       const raw = fieldValues[key]
       if (prop.type === 'number' || prop.type === 'integer') {
         if (raw !== '' && raw !== undefined) {
-          const n = Number(raw)
-          if (!isNaN(n)) args[key] = n
+          const parsed = Number(raw)
+          if (!Number.isNaN(parsed)) args[key] = parsed
         }
       } else if (prop.type === 'boolean') {
         args[key] = Boolean(raw)
@@ -148,8 +175,8 @@ export default function PlaygroundPage() {
             return null
           }
         }
-      } else {
-        if (raw !== '' && raw !== undefined) args[key] = raw
+      } else if (raw !== '' && raw !== undefined) {
+        args[key] = raw
       }
     }
     return args
@@ -160,12 +187,14 @@ export default function PlaygroundPage() {
     setRunning(true)
     const start = Date.now()
     try {
-      const res = await api.tools.call(selectedIntegration.integration_id, selectedTool.name, args)
+      const response = await api.tools.call(
+        selectedIntegration.integration_id,
+        selectedTool.name,
+        args,
+      )
       setDurationMs(Date.now() - start)
-      setResult(res)
-      if (res.status === 'approval_required') {
-        setAwaitingApproval(true)
-      }
+      setResult(response)
+      if (response.status === 'approval_required') setAwaitingApproval(true)
     } finally {
       setRunning(false)
     }
@@ -183,22 +212,12 @@ export default function PlaygroundPage() {
   }
 
   function handleRawToggle(toRaw: boolean) {
-    if (toRaw) {
-      const args = buildArgs() ?? {}
-      setRawJson(JSON.stringify(args, null, 2))
-    }
+    if (toRaw) setRawJson(JSON.stringify(buildArgs() ?? {}, null, 2))
     setRawMode(toRaw)
   }
 
-  const hasProperties = useMemo(() => {
-    const props = selectedTool?.inputSchema?.properties as Record<string, unknown> | undefined
-    return props && Object.keys(props).length > 0
-  }, [selectedTool])
-
-  const paramCount = useMemo(() => {
-    const props = selectedTool?.inputSchema?.properties as Record<string, unknown> | undefined
-    return props ? Object.keys(props).length : 0
-  }, [selectedTool])
+  const schemaProps = selectedTool?.inputSchema?.properties as Record<string, unknown> | undefined
+  const paramCount = schemaProps ? Object.keys(schemaProps).length : 0
 
   const hasUnfilledRequired = useMemo(() => {
     if (rawMode) return false
@@ -207,15 +226,18 @@ export default function PlaygroundPage() {
     if (required.length === 0) return false
     const props = schema?.properties as Record<string, { type?: string }> | undefined
     return required.some((key) => {
-      const prop = props?.[key]
-      if (prop?.type === 'boolean') return false
-      const val = fieldValues[key]
-      return val === '' || val === undefined || val === null
+      if (props?.[key]?.type === 'boolean') return false
+      const value = fieldValues[key]
+      return value === '' || value === undefined || value === null
     })
   }, [rawMode, selectedTool, fieldValues])
 
-  const canRun = !!(selectedIntegration && selectedTool && !running && !hasUnfilledRequired)
-  const isMac = navigator.platform.toUpperCase().includes('MAC')
+  const invalidJson = rawMode && buildArgs() === null
+  const canRun = Boolean(
+    selectedIntegration && selectedTool && !running && !hasUnfilledRequired && !invalidJson,
+  )
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '')
+
   const handleRunRef = useRef(handleRun)
   handleRunRef.current = handleRun
 
@@ -223,352 +245,309 @@ export default function PlaygroundPage() {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && canRun) {
         e.preventDefault()
-        handleRunRef.current()
+        void handleRunRef.current()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [canRun])
 
-  return (
-    <>
-      {/* Page header */}
-      <div
-        style={{
-          height: 44,
-          display: 'flex',
-          alignItems: 'center',
-          padding: `0 ${sidePad}px`,
-          borderBottom: '1px solid var(--border)',
-          background: 'var(--content-bg)',
-          flexShrink: 0,
-        }}
-      >
-        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>Playground</span>
+  const filteredTools = useMemo(() => {
+    const needle = toolQuery.trim().toLowerCase()
+    if (!needle) return tools
+    return tools.filter(
+      (tool) =>
+        tool.name.toLowerCase().includes(needle) ||
+        (tool.description ?? '').toLowerCase().includes(needle),
+    )
+  }, [tools, toolQuery])
+
+  if (installed.length === 0) {
+    return (
+      <div className="sutr-page">
+        <SutrPageHeader
+          eyebrow="Operate"
+          title="Playground"
+          subtitle="Call a governed tool by hand and read exactly what came back."
+        />
+        <div className="sutr-page__body">
+          <SutrEmpty
+            icon={<Plug size={17} />}
+            title="No integrations connected"
+            body="The playground calls the same governed endpoint your agents use, so it needs at least one connected integration."
+            action={
+              <SutrLinkButton to="/app/integrations" variant="brand" size="sm">
+                Connect an integration
+              </SutrLinkButton>
+            }
+          />
+        </div>
       </div>
+    )
+  }
 
-      {/* Toolbar */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          flexWrap: isMobile ? 'wrap' : 'nowrap',
-          gap: 8,
-          padding: `10px ${sidePad}px`,
-          borderBottom: '1px solid var(--border)',
-          background: 'var(--content-bg)',
-          flexShrink: 0,
-        }}
-      >
-        {/* Integration */}
-        {installed.length === 0 ? (
-          <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>
-            No integrations.{' '}
-            <Link
-              to="/integrations"
-              style={{ color: 'var(--blue)', textDecoration: 'none', fontWeight: 500 }}
-            >
-              Connect one →
-            </Link>
-          </div>
-        ) : (
+  return (
+    <div className="sutr-page" style={{ overflow: 'hidden' }}>
+      <SutrPageHeader
+        eyebrow="Operate"
+        title="Playground"
+        subtitle="The same execution path as an agent: policy, approval, credential injection, audit."
+        actions={
           <>
-            <IntegrationSelector
-              installed={installed}
-              integrations={integrations}
-              selected={selectedIntegration}
-              onSelect={setSelectedIntegration}
-            />
-
-            {/* Separator */}
-            {!isMobile && (
-              <span style={{ color: 'var(--border-strong)', fontSize: 16, userSelect: 'none' }}>
-                /
-              </span>
-            )}
-
-            {/* Tool selector */}
-            <div
-              style={{
-                flex: isMobile ? '1 1 100%' : '1 1 auto',
-                minWidth: 0,
-                maxWidth: isMobile ? '100%' : 400,
-              }}
-            >
-              <ToolSelector
-                tools={tools}
-                selected={selectedTool}
-                onSelect={setSelectedTool}
-                loading={toolsLoading}
-              />
-            </div>
-
-            {/* Mode control */}
-            {selectedTool && selectedIntegration && (
+            {selectedTool && selectedIntegration ? (
               <ModeControl
                 mode={selectedTool.execution_mode}
                 integrationName={selectedIntegration.integration_id}
                 toolName={selectedTool.name}
-                onModeChange={(newMode) =>
-                  setSelectedTool((prev) => (prev ? { ...prev, execution_mode: newMode } : prev))
+                onModeChange={(next) =>
+                  setSelectedTool((prev) => (prev ? { ...prev, execution_mode: next } : prev))
                 }
               />
-            )}
-
-            {/* Spacer */}
-            <div style={{ flex: 1 }} />
-
-            {/* Run */}
-            <Button
-              onClick={handleRun}
+            ) : null}
+            <SutrButton
+              variant="brand"
+              onClick={() => void handleRun()}
               disabled={!canRun}
-              size="sm"
-              style={{ gap: 5, paddingLeft: 12, paddingRight: 14 }}
+              loading={running}
             >
-              {running ? (
-                <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
-              ) : (
-                <Play size={12} />
-              )}
+              {running ? null : <Play size={13} />}
               {running ? 'Running…' : 'Run'}
-              {!running && !isMobile && (
-                <span style={{ fontSize: 10, opacity: 0.5, letterSpacing: 0 }}>
-                  {isMac ? '⌘↵' : 'Ctrl+↵'}
-                </span>
-              )}
-            </Button>
+              {!running && !isMobile ? <SutrKbd>{isMac ? '⌘↵' : 'Ctrl↵'}</SutrKbd> : null}
+            </SutrButton>
           </>
-        )}
-      </div>
+        }
+      />
 
-      {/* Content area */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {/* Parameters section (collapsible) */}
-        {selectedTool && (
+      <div className="pg">
+        <section className="pg__pane pg__pane--tools" aria-label="Tool selection">
+          <div className="pg__pane-head">
+            <span className="pg__pane-title">Tool</span>
+            {toolsLoading ? <SutrSpinner size={12} /> : null}
+            <span className="sutr-meta" style={{ marginLeft: 'auto' }}>
+              {filteredTools.length}
+            </span>
+          </div>
           <div
-            style={{
-              flexShrink: 0,
-              borderBottom: '1px solid var(--border)',
-              maxHeight: paramsOpen ? '50vh' : undefined,
-              overflowY: paramsOpen ? 'auto' : undefined,
-            }}
+            className="pg__pane-body"
+            style={{ gap: 8, display: 'flex', flexDirection: 'column' }}
           >
-            {/* Section header — always visible, toggles collapse */}
-            <button
-              onClick={() => setParamsOpen((v) => !v)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                width: '100%',
-                padding: `9px ${sidePad}px`,
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                textAlign: 'left',
-                borderBottom: 'none',
+            <SutrSelect
+              aria-label="Integration"
+              value={selectedIntegration?.integration_id ?? ''}
+              onChange={(e) => {
+                const next = installed.find((entry) => entry.integration_id === e.target.value)
+                setSelectedIntegration(next ?? null)
+                params.delete('tool')
+                if (next) params.set('integration', next.integration_id)
+                setParams(params, { replace: true })
               }}
             >
-              <ChevronDown
-                size={13}
-                style={{
-                  color: 'var(--text-faint)',
-                  transform: paramsOpen ? undefined : 'rotate(-90deg)',
-                  transition: 'transform 150ms',
-                  flexShrink: 0,
-                }}
-              />
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  letterSpacing: 0.6,
-                  color: 'var(--text-faint)',
-                }}
-              >
-                Parameters
-              </span>
-              {hasUnfilledRequired && (
-                <span style={{ fontSize: 11, color: 'var(--red)', lineHeight: 1 }}>*</span>
-              )}
-              {paramCount > 0 && (
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 500,
-                    color: 'var(--text-faint)',
-                    background: 'var(--surface)',
-                    border: '1px solid var(--border)',
-                    padding: '1px 6px',
-                    borderRadius: 4,
+              {installed.map((entry) => {
+                const definition = integrations.find((i) => i.id === entry.integration_id)
+                return (
+                  <option key={entry.integration_id} value={entry.integration_id}>
+                    {definition?.name ?? entry.integration_id}
+                  </option>
+                )
+              })}
+            </SutrSelect>
+
+            <SutrSearchInput
+              value={toolQuery}
+              onValueChange={setToolQuery}
+              ariaLabel="Filter tools"
+              placeholder="Filter tools"
+            />
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              {filteredTools.map((tool) => (
+                <button
+                  key={tool.name}
+                  type="button"
+                  className="pg__tool"
+                  aria-pressed={tool.name === selectedTool?.name}
+                  onClick={() => {
+                    setSelectedTool(tool)
+                    params.set('tool', tool.name)
+                    setParams(params, { replace: true })
                   }}
                 >
-                  {paramCount}
+                  <span className="pg__tool-name">{tool.name}</span>
+                  {tool.description ? (
+                    <span className="sutr-meta sutr-truncate">{tool.description}</span>
+                  ) : null}
+                </button>
+              ))}
+              {!toolsLoading && filteredTools.length === 0 ? (
+                <span className="sutr-meta" style={{ padding: '8px 10px' }}>
+                  No tools match.
                 </span>
-              )}
-              {/* Form/Raw toggle — right-aligned, only when there are properties */}
-              {hasProperties && (
-                <div
-                  style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      background: 'var(--surface)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 4,
-                      padding: 2,
-                      gap: 1,
-                    }}
-                  >
-                    {(['Form', 'Raw'] as const).map((mode) => {
-                      const isActive = mode === 'Raw' ? rawMode : !rawMode
-                      return (
-                        <button
-                          key={mode}
-                          onClick={() => handleRawToggle(mode === 'Raw')}
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 500,
-                            padding: '1px 7px',
-                            borderRadius: 3,
-                            border: 'none',
-                            cursor: 'pointer',
-                            background: isActive ? 'var(--content-bg)' : 'transparent',
-                            color: isActive ? 'var(--text)' : 'var(--text-faint)',
-                            boxShadow: isActive ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
-                            transition: 'background 120ms',
-                          }}
-                        >
-                          {mode}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-            </button>
+              ) : null}
+            </div>
+          </div>
+        </section>
 
-            {/* Fields */}
-            {paramsOpen && (
-              <div style={{ padding: isMobile ? '12px 14px 14px' : '16px 20px 16px 41px' }}>
-                <SchemaForm
-                  schema={selectedTool.inputSchema as Record<string, unknown> | undefined}
-                  values={fieldValues}
-                  rawMode={rawMode}
-                  rawJson={rawJson}
-                  onFieldChange={(field, value) =>
-                    setFieldValues((prev) => ({ ...prev, [field]: value }))
-                  }
-                  onRawJsonChange={setRawJson}
+        <section className="pg__pane" aria-label="Arguments">
+          <div className="pg__pane-head">
+            <span className="pg__pane-title">Arguments</span>
+            {paramCount > 0 ? (
+              <SutrBadge tone="neutral" plain>
+                {paramCount}
+              </SutrBadge>
+            ) : null}
+            {hasUnfilledRequired ? (
+              <SutrBadge tone="warning" plain>
+                required missing
+              </SutrBadge>
+            ) : null}
+            {paramCount > 0 ? (
+              <span style={{ marginLeft: 'auto' }}>
+                <SutrSegmented
+                  ariaLabel="Argument editor mode"
+                  value={rawMode ? 'raw' : 'form'}
+                  onChange={(mode) => handleRawToggle(mode === 'raw')}
+                  items={[
+                    { value: 'form', label: 'Form' },
+                    { value: 'raw', label: 'JSON' },
+                  ]}
                 />
+              </span>
+            ) : null}
+          </div>
+          <div className="pg__pane-body">
+            {selectedTool ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <code className="sutr-mono" style={{ fontSize: 13, color: 'var(--text)' }}>
+                    {selectedTool.name}
+                  </code>
+                  {selectedTool.description ? (
+                    <span className="sutr-meta">{selectedTool.description}</span>
+                  ) : null}
+                </div>
+
+                {paramCount === 0 ? (
+                  <span className="sutr-meta">This tool takes no arguments.</span>
+                ) : (
+                  <SchemaForm
+                    schema={selectedTool.inputSchema as Record<string, unknown> | undefined}
+                    values={fieldValues}
+                    rawMode={rawMode}
+                    rawJson={rawJson}
+                    onFieldChange={(field, value) =>
+                      setFieldValues((prev) => ({ ...prev, [field]: value }))
+                    }
+                    onRawJsonChange={setRawJson}
+                  />
+                )}
+
+                {invalidJson ? (
+                  <span className="sutr-field__error">
+                    The JSON above does not parse, so the call cannot be built.
+                  </span>
+                ) : null}
               </div>
+            ) : (
+              <span className="sutr-meta">Select a tool to see its input schema.</span>
             )}
           </div>
-        )}
+        </section>
 
-        {/* Response */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? 14 : 24 }}>
-          <ResponsePanel
-            result={result}
-            running={running}
-            awaitingApproval={awaitingApproval}
-            durationMs={durationMs}
-            onOpenDrawer={() => setDrawerOpen(true)}
-            onCancelPolling={() => setAwaitingApproval(false)}
-          />
-        </div>
+        <section className="pg__pane pg__pane--result" aria-label="Execution">
+          <div className="pg__pane-head">
+            <span className="pg__pane-title">Execution</span>
+            {durationMs !== null ? (
+              <span className="sutr-meta sutr-mono" style={{ marginLeft: 'auto' }}>
+                {durationMs} ms
+              </span>
+            ) : null}
+          </div>
+          <div className="pg__pane-body">
+            <ResponsePanel
+              result={result}
+              running={running}
+              awaitingApproval={awaitingApproval}
+              durationMs={durationMs}
+              onOpenDrawer={() => setDrawerOpen(true)}
+              onCancelPolling={() => setAwaitingApproval(false)}
+            />
+          </div>
+        </section>
       </div>
 
-      {/* Approval drawer */}
-      {drawerOpen &&
-        approvalRequestId &&
-        createPortal(
-          <>
-            <div
-              onClick={() => setDrawerOpen(false)}
-              style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 9998 }}
-            />
-            <div
-              style={{
-                position: 'fixed',
-                top: 0,
-                right: 0,
-                bottom: 0,
-                width: isMobile ? '100%' : 480,
-                maxWidth: '100%',
-                background: 'var(--content-bg)',
-                borderLeft: '1px solid var(--border)',
-                zIndex: 9999,
-                display: 'flex',
-                flexDirection: 'column',
-                boxShadow: '-8px 0 32px rgba(0,0,0,0.12)',
-                overflowY: 'auto',
-              }}
-            >
+      {drawerOpen && approvalRequestId
+        ? createPortal(
+            <>
+              <div
+                onClick={() => setDrawerOpen(false)}
+                style={{ position: 'fixed', inset: 0, background: 'rgba(4,5,6,0.6)', zIndex: 9998 }}
+              />
               <div
                 style={{
-                  height: 44,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '0 16px',
-                  borderBottom: '1px solid var(--border)',
-                  flexShrink: 0,
-                  position: 'sticky',
+                  position: 'fixed',
                   top: 0,
-                  background: 'var(--content-bg)',
-                  zIndex: 1,
+                  right: 0,
+                  bottom: 0,
+                  width: isMobile ? '100%' : 500,
+                  maxWidth: '100%',
+                  background: 'var(--surface-elevated)',
+                  borderLeft: '1px solid var(--border-strong)',
+                  zIndex: 9999,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  boxShadow: 'var(--shadow-lg)',
+                  overflowY: 'auto',
                 }}
               >
-                <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-dim)' }}>
-                  Approve tool call
-                </span>
-                <button
-                  onClick={() => setDrawerOpen(false)}
+                <div
                   style={{
-                    width: 24,
-                    height: 24,
+                    height: 44,
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: 'var(--text-faint)',
-                    borderRadius: 4,
+                    justifyContent: 'space-between',
+                    padding: '0 14px',
+                    borderBottom: '1px solid var(--border)',
+                    flexShrink: 0,
+                    position: 'sticky',
+                    top: 0,
+                    background: 'var(--surface-elevated)',
+                    zIndex: 1,
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-faint)')}
                 >
-                  <X size={15} />
-                </button>
+                  <span className="sutr-section-label">Approve tool call</span>
+                  <SutrButton
+                    variant="ghost"
+                    size="sm"
+                    iconOnly
+                    aria-label="Close"
+                    onClick={() => setDrawerOpen(false)}
+                  >
+                    <X size={14} />
+                  </SutrButton>
+                </div>
+                <ApprovePage
+                  overrideId={approvalRequestId}
+                  embeddedProp
+                  onAllowTool={(integrationName, toolName) => {
+                    // Close and re-run immediately rather than waiting for the
+                    // next poll; mirror the policy change locally so the mode
+                    // control agrees with the server.
+                    setDrawerOpen(false)
+                    setAwaitingApproval(false)
+                    setSelectedTool((prev) =>
+                      prev && prev.name === toolName ? { ...prev, execution_mode: 'allow' } : prev,
+                    )
+                    api.toolSettings.update(integrationName, toolName, 'allow').catch(() => {
+                      /* best-effort — the wildcard grant already covers enforcement */
+                    })
+                    void doCallRef.current(lastArgsRef.current)
+                  }}
+                />
               </div>
-              <ApprovePage
-                overrideId={approvalRequestId}
-                embeddedProp={true}
-                onAllowTool={(_integrationName, toolName) => {
-                  // Close the drawer and re-run immediately — don't wait for the polling cycle.
-                  // Also flip the tool's local execution_mode so the ModeControl reflects the change.
-                  setDrawerOpen(false)
-                  setAwaitingApproval(false)
-                  setSelectedTool((prev) =>
-                    prev && prev.name === toolName ? { ...prev, execution_mode: 'allow' } : prev,
-                  )
-                  api.toolSettings.update(_integrationName, toolName, 'allow').catch(() => {
-                    /* best-effort — wildcard policy already covers enforcement */
-                  })
-                  doCallRef.current(lastArgsRef.current)
-                }}
-              />
-            </div>
-          </>,
-          document.body,
-        )}
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-    </>
+            </>,
+            document.body,
+          )
+        : null}
+    </div>
   )
 }

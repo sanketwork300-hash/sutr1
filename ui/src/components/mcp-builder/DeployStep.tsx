@@ -261,7 +261,7 @@ export function DeployStep({
                   Connected as {connection?.account_label || 'your account'}
                 </span>
                 <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-faint)' }}>
-                  Manage in Settings → Connected accounts
+                  Manage in Govern → Credentials
                 </span>
               </div>
             ) : (

@@ -1,15 +1,58 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#08090a" />
+
+    <title>Swaraj Sutr — Infrastructure for Governed AI Agents</title>
+    <meta
+      name="description"
+      content="Connect APIs, MCP servers and enterprise tools. Govern every execution. Deploy agent infrastructure anywhere."
+    />
+    <link rel="canonical" href="https://swarajsutr.ai/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Swaraj Sutr" />
+    <meta property="og:title" content="Swaraj Sutr — Infrastructure for Governed AI Agents" />
+    <meta
+      property="og:description"
+      content="Connect APIs, MCP servers and enterprise tools. Govern every execution. Deploy agent infrastructure anywhere."
+    />
+    <meta property="og:url" content="https://swarajsutr.ai/" />
+    <meta property="og:image" content="https://swarajsutr.ai/og-swaraj-sutr.png" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Swaraj Sutr — Infrastructure for Governed AI Agents" />
+    <meta
+      name="twitter:description"
+      content="Connect APIs, MCP servers and enterprise tools. Govern every execution. Deploy agent infrastructure anywhere."
+    />
+    <meta name="twitter:image" content="https://swarajsutr.ai/og-swaraj-sutr.png" />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
+
     <script>
+      // Paint the stored theme before first render so a dark-mode user never
+      // sees a light flash. The store re-applies the same value on boot.
+      ;(function () {
+        try {
+          var saved = localStorage.getItem('sutr_theme')
+          document.documentElement.setAttribute(
+            'data-theme',
+            saved === 'light' || saved === 'dark' ? saved : 'dark',
+          )
+        } catch (e) {
+          /* private mode: the dark default in the markup already applies */
+        }
+      })()
+
       var favicon = document.createElement('link')
       favicon.rel = 'icon'
       favicon.type = 'image/png'
@@ -19,7 +62,6 @@
           : '/sutr-favicon.png'
       document.head.appendChild(favicon)
     </script>
-    <title>Sutr</title>
   </head>
   <body>
     <div id="root"></div>

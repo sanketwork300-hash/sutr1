@@ -3,6 +3,7 @@ import { Trash2, Plus, Copy, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SutrPageHeader } from '@/components/sutr'
 import { api, type ApiKey, type CreateApiKeyResponse } from '@/api/client'
 import { useIsMobile } from '@/lib/useMediaQuery'
 
@@ -289,19 +290,11 @@ export default function DeveloperPage() {
 
   return (
     <>
-      <div
-        style={{
-          height: 44,
-          display: 'flex',
-          alignItems: 'center',
-          padding: `0 ${isMobile ? 14 : 20}px`,
-          borderBottom: '1px solid var(--border)',
-          background: 'var(--content-bg)',
-          flexShrink: 0,
-        }}
-      >
-        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>Connect</span>
-      </div>
+      <SutrPageHeader
+        eyebrow="Develop"
+        title="Connect a client"
+        subtitle="Point an MCP client at this instance. Every tool it can reach is still governed by the policies you set."
+      />
 
       <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '20px 14px' : '32px 40px' }}>
         {/* MCP Endpoint */}

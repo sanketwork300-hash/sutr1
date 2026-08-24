@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { SutrPageHeader } from '@/components/sutr'
 import { api, ApiError, type SubscriptionResponse } from '@/api/client'
 import { useIsMobile } from '@/lib/useMediaQuery'
 
@@ -39,7 +40,7 @@ export default function BillingPage() {
       .then(setSub)
       .catch((e: unknown) => {
         if (e instanceof ApiError && e.status === 404) {
-          navigate('/settings', { replace: true })
+          navigate('/app/settings', { replace: true })
           return
         }
         setError(e instanceof Error ? e.message : 'Could not load billing')
@@ -91,19 +92,11 @@ export default function BillingPage() {
 
   return (
     <>
-      <div
-        style={{
-          height: 44,
-          display: 'flex',
-          alignItems: 'center',
-          padding: `0 ${isMobile ? 14 : 20}px`,
-          borderBottom: '1px solid var(--border)',
-          background: 'var(--content-bg)',
-          flexShrink: 0,
-        }}
-      >
-        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>Billing</span>
-      </div>
+      <SutrPageHeader
+        eyebrow="Account"
+        title="Billing"
+        subtitle="Plan, period and invoices for this organisation."
+      />
 
       <div
         style={{

@@ -6,7 +6,7 @@ nav_title: MCP builder
 
 The builder turns an OpenAPI specification into governed agent tools, one visible stage at a time. Each stage names what the compiler actually did, so a failure is attributable to a stage rather than to "the import".
 
-**Integrations → New → Build from an API**, or go straight to `/integrations/openapi/new`.
+**Integrations → New → Build from an API**, or go straight to `/app/integrations/openapi/new`.
 
 ```
 Source → (Choose file) → Normalize & IR → Select tools → Authentication → Build → Deploy
@@ -14,7 +14,7 @@ Source → (Choose file) → Normalize & IR → Select tools → Authentication 
 
 Nothing is created until the Build stage, and deploying is optional and separate.
 
-> The hand-rolled **Custom API** builder was removed. The OpenAPI path produces the same integration rows but derives the paths, parameters, and auth from a specification instead of asking you to retype them, so it is strictly better for the same job. `/integrations/custom-api/new` redirects here.
+> The hand-rolled **Custom API** builder was removed. The OpenAPI path produces the same integration rows but derives the paths, parameters, and auth from a specification instead of asking you to retype them, so it is strictly better for the same job. `/app/integrations/custom-api/new` redirects here.
 
 ---
 

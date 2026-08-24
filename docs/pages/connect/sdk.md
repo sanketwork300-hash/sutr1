@@ -15,7 +15,7 @@ is one argument rather than a polling loop you write yourself.
 
 ## Credentials
 
-Create an API key in the UI under **Settings → API Keys**, then either pass it
+Create an API key in the UI under **Develop → API Keys**, then either pass it
 explicitly or set `SUTR_API_KEY` (and `SUTR_BASE_URL` for a self-hosted
 instance). The upstream service credentials stay on the Sutr server — your
 agent code never holds them.

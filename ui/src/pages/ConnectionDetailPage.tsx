@@ -242,7 +242,7 @@ export default function ConnectionDetailPage() {
   async function handleDisconnect() {
     if (!inst) return
     await remove(inst.integration_id)
-    navigate('/integrations')
+    navigate('/app/integrations')
   }
 
   async function handleDeleteCustom() {
@@ -255,7 +255,7 @@ export default function ConnectionDetailPage() {
     )
       return
     await removeCustomMcp(customMcpDef.id)
-    navigate('/integrations')
+    navigate('/app/integrations')
   }
 
   async function handleDeleteCustomApi() {
@@ -268,7 +268,7 @@ export default function ConnectionDetailPage() {
     )
       return
     await removeCustomApi(customApiDef.id)
-    navigate('/integrations')
+    navigate('/app/integrations')
   }
 
   return (
@@ -324,7 +324,7 @@ export default function ConnectionDetailPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => navigate(`/integrations/custom-api/${customApiDef.id}`)}
+                  onClick={() => navigate(`/app/integrations/custom-api/${customApiDef.id}`)}
                 >
                   Edit
                 </Button>
@@ -352,7 +352,7 @@ export default function ConnectionDetailPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => navigate(`/integrations/custom-api/${customApiDef.id}`)}
+                  onClick={() => navigate(`/app/integrations/custom-api/${customApiDef.id}`)}
                 >
                   Edit
                 </Button>
@@ -1321,18 +1321,20 @@ function PreviewCategoryGroup({
   )
 }
 
-function FilterBar({ children, sidePad = 20 }: { children: React.ReactNode; sidePad?: number }) {
+/** The detail page's own action bar. Taller and quieter than the old filter
+ *  strip so it reads as part of the console chrome rather than as a toolbar. */
+function FilterBar({ children, sidePad = 22 }: { children: React.ReactNode; sidePad?: number }) {
   return (
     <div
       style={{
-        height: 44,
+        minHeight: 52,
         display: 'flex',
         alignItems: 'center',
-        padding: `0 ${sidePad}px`,
+        padding: `10px ${sidePad}px`,
         borderBottom: '1px solid var(--border)',
-        background: 'var(--content-bg)',
+        background: 'var(--bg)',
         flexShrink: 0,
-        gap: 8,
+        gap: 10,
       }}
     >
       {children}
@@ -1343,7 +1345,7 @@ function FilterBar({ children, sidePad = 20 }: { children: React.ReactNode; side
 function BackLink() {
   return (
     <Link
-      to="/integrations"
+      to="/app/integrations"
       style={{
         display: 'flex',
         alignItems: 'center',

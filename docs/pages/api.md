@@ -167,7 +167,7 @@ Open `authorization_url` in a browser. After the user authorizes, the provider r
 ### `GET /api/auth/callback`
 
 OAuth redirect target. Handled automatically by the server — do not call directly.
-On success, the browser is redirected to the integration detail page in the UI at `/integrations/{integration_id}`.
+On success, the browser is redirected to the integration detail page in the UI at `/app/integrations/{integration_id}`.
 
 **Query params:** `code`, `state` (set by the OAuth provider)
 

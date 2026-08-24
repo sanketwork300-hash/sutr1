@@ -29,6 +29,7 @@
         {
             "section": "Reference",
             "items": [
+                "console",
                 "mcp-builder",
                 "connected-accounts",
                 "api",

@@ -70,7 +70,7 @@ export function ConnectDialog({ integration, open, reauth = false, onClose }: Pr
   }, [open, integration])
 
   function navigateToIntegrationDetail(integrationId: string) {
-    const detailPath = `/integrations/${encodeURIComponent(integrationId)}`
+    const detailPath = `/app/integrations/${encodeURIComponent(integrationId)}`
     if (location.pathname !== detailPath) {
       navigate(detailPath)
     }
@@ -147,7 +147,7 @@ export function ConnectDialog({ integration, open, reauth = false, onClose }: Pr
     setToken('')
     setError('')
     setLimitError(null)
-    navigate('/settings/billing')
+    navigate('/app/settings/billing')
   }
 
   if (!integration) return null

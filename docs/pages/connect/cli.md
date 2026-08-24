@@ -41,7 +41,7 @@ You should really install the [Sutr Skills](/connect/skills) for your agent to u
 
 ## Authentication
 
-The CLI authenticates with an API key issued from the Sutr UI (Settings → API Keys):
+The CLI authenticates with an API key issued from the Sutr UI (Develop → API Keys):
 
 ```sh
 ap auth login --api-key ap_...

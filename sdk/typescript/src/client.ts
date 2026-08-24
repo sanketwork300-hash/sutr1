@@ -149,7 +149,7 @@ export class Sutr {
     if (!apiKey && !accessToken) {
       throw new SutrError(
         'No credentials. Pass apiKey or set SUTR_API_KEY ' +
-          '(create a key in the Sutr UI under Settings → API Keys).',
+          '(create a key in the Sutr UI under Develop → API Keys).',
       );
     }
 

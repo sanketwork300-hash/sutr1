@@ -1,379 +1,353 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { FileClock, Loader2, ScrollText, ShieldCheck } from 'lucide-react'
-import { LogCard } from '@/components/logs/LogCard'
+import { useSearchParams } from 'react-router-dom'
+import { RefreshCw, ScrollText, ShieldCheck } from 'lucide-react'
 import { LogDetailPanel } from '@/components/logs/LogDetailPanel'
 import { api, ApiError, type AuditEvent, type LogEntry } from '@/api/client'
+import { useCatalogStore } from '@/stores/catalog'
+import { formatClock, formatDateTime, formatDuration, relativeTime } from '@/lib/format'
+import {
+  SutrBadge,
+  SutrButton,
+  SutrEmpty,
+  SutrError,
+  SutrPage,
+  SutrPageBody,
+  SutrPageHeader,
+  SutrSearchInput,
+  SutrSelect,
+  SutrStatus,
+  SutrTabs,
+  SutrTimeline,
+  describeError,
+  type TimelineEntry,
+} from '@/components/sutr'
 
-type Tab = 'logs' | 'audit'
+type Tab = 'executions' | 'audit'
 
-const OUTCOMES = ['', 'executed', 'pending', 'denied', 'error'] as const
+const PAGE = 60
 
+/**
+ * Activity as a timeline, because ordering is the point: what an agent asked
+ * for, what the policy decided, and what came back — in the order it happened.
+ */
 export default function ActivityPage() {
-  const [tab, setTab] = useState<Tab>('logs')
+  const [tab, setTab] = useState<Tab>('executions')
 
   return (
-    <div style={{ flex: 1, overflow: 'auto', background: 'var(--bg)', padding: '28px 24px 80px' }}>
-      <div style={{ maxWidth: 900, margin: '0 auto' }}>
-        <div style={{ marginBottom: 16 }}>
-          <h1 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--text)' }}>
-            Activity
-          </h1>
-          <p style={{ margin: '3px 0 0', fontSize: 12.5, color: 'var(--text-dim)' }}>
-            What your agents did, and what people changed.
-          </p>
-        </div>
+    <SutrPage>
+      <SutrPageHeader
+        eyebrow="Operate"
+        title="Activity"
+        subtitle="Every tool execution that passed through the gateway, and every change a person made to the configuration."
+      >
+        <SutrTabs
+          ariaLabel="Activity kind"
+          value={tab}
+          onChange={setTab}
+          items={[
+            { value: 'executions', label: 'Tool executions' },
+            { value: 'audit', label: 'Audit trail' },
+          ]}
+        />
+      </SutrPageHeader>
 
-        <div style={{ display: 'flex', gap: 4, marginBottom: 14 }}>
-          <TabButton active={tab === 'logs'} onClick={() => setTab('logs')} icon={<ScrollText size={13} />}>
-            Tool calls
-          </TabButton>
-          <TabButton active={tab === 'audit'} onClick={() => setTab('audit')} icon={<ShieldCheck size={13} />}>
-            Audit trail
-          </TabButton>
-        </div>
-
-        {tab === 'logs' ? <LogsTab /> : <AuditTab />}
-      </div>
-    </div>
+      {tab === 'executions' ? <ExecutionsTab /> : <AuditTab />}
+    </SutrPage>
   )
 }
 
-function LogsTab() {
-  const [entries, setEntries] = useState<LogEntry[]>([])
-  const [outcome, setOutcome] = useState<string>('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+function ExecutionsTab() {
+  const [params, setParams] = useSearchParams()
+  const tools = useCatalogStore((s) => s.tools)
+  const loadCatalog = useCatalogStore((s) => s.load)
+
+  const [entries, setEntries] = useState<LogEntry[] | null>(null)
+  const [outcome, setOutcome] = useState(params.get('outcome') ?? '')
+  const [integration, setIntegration] = useState(params.get('integration') ?? '')
+  const [tool, setTool] = useState(params.get('tool') ?? '')
+  const [search, setSearch] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [exhausted, setExhausted] = useState(false)
   const [selected, setSelected] = useState<LogEntry | null>(null)
 
-  const load = useCallback(async (filterOutcome: string) => {
-    setLoading(true)
-    try {
-      setEntries(await api.logs.list({ limit: 100, outcome: filterOutcome || undefined }))
-      setError('')
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load logs')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  useEffect(() => {
+    void loadCatalog()
+  }, [loadCatalog])
+
+  const load = useCallback(
+    async (offset: number) => {
+      setLoading(true)
+      try {
+        const page = await api.logs.list({
+          limit: PAGE,
+          offset,
+          outcome: outcome || undefined,
+          integration: integration || undefined,
+          tool: tool || undefined,
+        })
+        setEntries((previous) => (offset === 0 ? page : [...(previous ?? []), ...page]))
+        setExhausted(page.length < PAGE)
+        setError(null)
+      } catch (err) {
+        setError(describeError(err).message)
+        if (offset === 0) setEntries([])
+      } finally {
+        setLoading(false)
+      }
+    },
+    [outcome, integration, tool],
+  )
 
   useEffect(() => {
-    load(outcome)
-  }, [outcome, load])
+    void load(0)
+  }, [load])
+
+  // Filters live in the URL so a filtered view can be linked to from a tool
+  // page or shared with a colleague.
+  useEffect(() => {
+    const next = new URLSearchParams(params)
+    for (const [key, value] of [
+      ['outcome', outcome],
+      ['integration', integration],
+      ['tool', tool],
+    ] as const) {
+      if (value) next.set(key, value)
+      else next.delete(key)
+    }
+    if (next.toString() !== params.toString()) setParams(next, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outcome, integration, tool])
+
+  const integrations = useMemo(
+    () => [...new Set(tools.map((t) => t.integration_id).filter(Boolean))].sort() as string[],
+    [tools],
+  )
+
+  const visible = useMemo(() => {
+    const needle = search.trim().toLowerCase()
+    if (!needle) return entries ?? []
+    return (entries ?? []).filter(
+      (entry) =>
+        entry.tool_name.toLowerCase().includes(needle) ||
+        entry.integration_id.toLowerCase().includes(needle) ||
+        (entry.args_json ?? '').toLowerCase().includes(needle),
+    )
+  }, [entries, search])
+
+  const timeline: TimelineEntry[] = visible.map((entry) => ({
+    id: String(entry.id),
+    time: formatClock(entry.timestamp),
+    tone:
+      entry.outcome === 'denied' || entry.outcome === 'error'
+        ? 'danger'
+        : entry.outcome === 'approval_required' || entry.outcome === 'pending'
+          ? 'warning'
+          : 'success',
+    title: (
+      <>
+        <code className="sutr-mono" style={{ color: 'var(--text)' }}>
+          {entry.tool_name}
+        </code>
+        <SutrStatus domain="outcome" value={entry.outcome} />
+        {entry.access_reason ? (
+          <SutrBadge tone="info" plain title="How this call was authorized">
+            {entry.access_reason.replace(/_/g, ' ')}
+          </SutrBadge>
+        ) : null}
+      </>
+    ),
+    detail: [
+      entry.integration_id,
+      formatDuration(entry.duration_ms),
+      entry.api_key_label ? `key “${entry.api_key_label}”` : null,
+      entry.requester_ip,
+      relativeTime(entry.timestamp),
+    ]
+      .filter(Boolean)
+      .join(' · '),
+  }))
 
   return (
-    <>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 12, flexWrap: 'wrap' }}>
-        {OUTCOMES.map((value) => (
-          <FilterChip
-            key={value || 'all'}
-            active={outcome === value}
-            onClick={() => setOutcome(value)}
-          >
-            {value || 'All'}
-          </FilterChip>
-        ))}
+    <SutrPageBody>
+      <div className="sutr-page__toolbar">
+        <SutrSearchInput
+          value={search}
+          onValueChange={setSearch}
+          ariaLabel="Search loaded executions"
+          placeholder="Filter loaded executions"
+          maxWidth={280}
+        />
+        <SutrSelect
+          aria-label="Filter by outcome"
+          value={outcome}
+          onChange={(e) => setOutcome(e.target.value)}
+          style={{ width: 180 }}
+        >
+          <option value="">All outcomes</option>
+          <option value="executed">Executed</option>
+          <option value="approval_required">Approval required</option>
+          <option value="approved">Approved</option>
+          <option value="denied">Denied</option>
+          <option value="error">Error</option>
+          <option value="pending">Pending</option>
+        </SutrSelect>
+        <SutrSelect
+          aria-label="Filter by provider"
+          value={integration}
+          onChange={(e) => setIntegration(e.target.value)}
+          style={{ width: 180 }}
+        >
+          <option value="">All providers</option>
+          {integrations.map((id) => (
+            <option key={id} value={id}>
+              {id}
+            </option>
+          ))}
+        </SutrSelect>
+        {tool ? (
+          <SutrButton variant="ghost" size="sm" onClick={() => setTool('')}>
+            tool: {tool} ✕
+          </SutrButton>
+        ) : null}
+        <SutrButton
+          variant="secondary"
+          size="sm"
+          loading={loading && entries !== null}
+          onClick={() => void load(0)}
+        >
+          <RefreshCw size={13} /> Refresh
+        </SutrButton>
       </div>
 
-      {error && <Banner>{error}</Banner>}
+      {error ? <SutrError what="Activity could not be read." why={error} /> : null}
 
-      {loading && entries.length === 0 ? (
-        <Spinner />
-      ) : entries.length === 0 ? (
-        <Empty
-          icon={<ScrollText size={22} />}
-          title="No tool calls yet"
-          hint="Every call an agent makes through Sutr shows up here, with its policy decision."
-        />
-      ) : (
+      {entries === null ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {entries.map((entry) => (
-            <LogCard
-              key={entry.id}
-              entry={entry}
-              onClick={() => setSelected(entry)}
-              onAction={() => load(outcome)}
-            />
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <span key={i} className="sutr-skeleton" style={{ height: 34 }} />
           ))}
         </div>
+      ) : timeline.length === 0 ? (
+        <SutrEmpty
+          icon={<ScrollText size={17} />}
+          title={entries.length === 0 ? 'No tool executions recorded' : 'Nothing matches'}
+          body={
+            entries.length === 0
+              ? 'Every call an agent makes through this instance is recorded here with its policy decision, latency and outcome.'
+              : 'Clear the filters to see the full timeline.'
+          }
+        />
+      ) : (
+        <>
+          <SutrTimeline
+            entries={timeline}
+            onSelect={(entry) => {
+              const match = (entries ?? []).find((row) => String(row.id) === entry.id)
+              if (match) setSelected(match)
+            }}
+          />
+          {!exhausted ? (
+            <SutrButton
+              variant="secondary"
+              loading={loading}
+              onClick={() => void load(entries.length)}
+            >
+              Load more
+            </SutrButton>
+          ) : (
+            <span className="sutr-meta">
+              {entries.length} execution{entries.length === 1 ? '' : 's'} loaded — that is
+              everything for these filters.
+            </span>
+          )}
+        </>
       )}
 
-      {selected &&
-        createPortal(
-          <LogDetailPanel entry={selected} onClose={() => setSelected(null)} />,
-          document.body,
-        )}
-    </>
+      {selected
+        ? createPortal(
+            <LogDetailPanel entry={selected} onClose={() => setSelected(null)} />,
+            document.body,
+          )
+        : null}
+    </SutrPageBody>
   )
 }
 
 function AuditTab() {
-  const [events, setEvents] = useState<AuditEvent[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [events, setEvents] = useState<AuditEvent[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [forbidden, setForbidden] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
-      try {
-        const rows = await api.audit.list({ limit: 100 })
+    api.audit
+      .list({ limit: 100 })
+      .then((rows) => {
         if (!cancelled) setEvents(rows)
-      } catch (e) {
+      })
+      .catch((err) => {
         if (cancelled) return
         // Reading the audit trail is owner/admin only — say so plainly rather
-        // than showing a raw 403.
-        if (e instanceof ApiError && e.status === 403) setForbidden(true)
-        else setError(e instanceof Error ? e.message : 'Failed to load the audit trail')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
+        // than surfacing a raw 403.
+        if (err instanceof ApiError && err.status === 403) setForbidden(true)
+        else setError(describeError(err).message)
+        setEvents([])
+      })
     return () => {
       cancelled = true
     }
   }, [])
 
-  if (loading) return <Spinner />
-  if (forbidden) {
-    return (
-      <Empty
-        icon={<ShieldCheck size={22} />}
-        title="Owners and admins only"
-        hint="The audit trail records who changed policies, keys, members, and integrations. Ask an owner for access."
-      />
-    )
-  }
-  if (error) return <Banner>{error}</Banner>
-  if (events.length === 0) {
-    return (
-      <Empty
-        icon={<FileClock size={22} />}
-        title="No audit events yet"
-        hint="Logins, policy changes, key management, approvals, and integration changes are recorded here."
-      />
-    )
-  }
-
-  return (
-    <div
-      style={{
-        background: 'var(--content-bg)',
-        border: '1px solid var(--border)',
-        borderRadius: 10,
-        overflow: 'hidden',
-      }}
-    >
-      {events.map((event, index) => (
-        <AuditRow key={event.id} event={event} first={index === 0} />
-      ))}
-    </div>
-  )
-}
-
-function AuditRow({ event, first }: { event: AuditEvent; first: boolean }) {
-  const [open, setOpen] = useState(false)
-  let metadata: Record<string, unknown> = {}
-  try {
-    metadata = JSON.parse(event.metadata_json || '{}')
-  } catch {
-    /* ignore malformed metadata */
-  }
-  const hasMetadata = Object.keys(metadata).length > 0
-
-  return (
-    <div style={{ borderTop: first ? 'none' : '1px solid var(--border)' }}>
-      <button
-        type="button"
-        onClick={() => hasMetadata && setOpen((value) => !value)}
-        style={{
-          display: 'flex',
-          alignItems: 'baseline',
-          gap: 10,
-          width: '100%',
-          textAlign: 'left',
-          padding: '10px 16px',
-          border: 'none',
-          background: 'transparent',
-          cursor: hasMetadata ? 'pointer' : 'default',
-          fontFamily: 'inherit',
-        }}
-      >
-        <span
-          style={{
-            fontSize: 11.5,
-            fontFamily: 'var(--font-mono)',
-            color: 'var(--text-dim)',
-            flexShrink: 0,
-            minWidth: 128,
-          }}
-        >
-          {new Date(/[Z+]/.test(event.timestamp) ? event.timestamp : `${event.timestamp}Z`)
-            .toLocaleString()
-            .replace(',', '')}
-        </span>
-        <span
-          style={{
-            fontSize: 11,
-            fontFamily: 'var(--font-mono)',
-            color: 'var(--syn-tag)',
-            flexShrink: 0,
-            minWidth: 190,
-          }}
-        >
+  const timeline: TimelineEntry[] = (events ?? []).map((event) => ({
+    id: String(event.id),
+    time: formatClock(event.timestamp),
+    tone: event.action.includes('delete') || event.action.includes('deny') ? 'danger' : 'brand',
+    title: (
+      <>
+        <span style={{ color: 'var(--text)' }}>{event.summary}</span>
+        <SutrBadge tone="neutral" plain>
           {event.action}
-        </span>
-        <span style={{ fontSize: 12.5, color: 'var(--text)', flex: 1, minWidth: 0 }}>
-          {event.summary}
-        </span>
-        <span style={{ fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }}>
-          {event.actor_type === 'api_key'
-            ? `key ${event.actor_api_key_prefix ?? ''}…`
-            : event.actor_type === 'system'
-              ? 'system'
-              : (event.ip ?? 'user')}
-        </span>
-      </button>
+        </SutrBadge>
+      </>
+    ),
+    detail: [
+      event.actor_type === 'api_key'
+        ? `api key ${event.actor_api_key_prefix ?? ''}`
+        : event.actor_type,
+      event.ip,
+      formatDateTime(event.timestamp),
+    ]
+      .filter(Boolean)
+      .join(' · '),
+  }))
 
-      {open && hasMetadata && (
-        <pre
-          style={{
-            margin: 0,
-            padding: '8px 16px 12px 154px',
-            fontSize: 11.5,
-            fontFamily: 'var(--font-mono)',
-            color: 'var(--text-dim)',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-          }}
-        >
-          {JSON.stringify(metadata, null, 2)}
-        </pre>
+  return (
+    <SutrPageBody>
+      {forbidden ? (
+        <SutrEmpty
+          icon={<ShieldCheck size={17} />}
+          title="The audit trail is restricted"
+          body="Only organisation owners and admins can read configuration history. Ask an owner if you need access."
+        />
+      ) : error ? (
+        <SutrError what="The audit trail could not be read." why={error} />
+      ) : events === null ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {[0, 1, 2, 3].map((i) => (
+            <span key={i} className="sutr-skeleton" style={{ height: 34 }} />
+          ))}
+        </div>
+      ) : timeline.length === 0 ? (
+        <SutrEmpty
+          icon={<ShieldCheck size={17} />}
+          title="No configuration changes recorded"
+          body="Policy changes, approvals, key creation and member changes are written here as they happen."
+        />
+      ) : (
+        <SutrTimeline entries={timeline} />
       )}
-    </div>
-  )
-}
-
-function TabButton({
-  active,
-  onClick,
-  icon,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  icon: React.ReactNode
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: '6px 12px',
-        fontSize: 12.5,
-        borderRadius: 7,
-        cursor: 'pointer',
-        fontFamily: 'inherit',
-        border: `1px solid ${active ? 'var(--text)' : 'var(--border)'}`,
-        background: active ? 'var(--content-bg)' : 'var(--surface)',
-        color: active ? 'var(--text)' : 'var(--text-dim)',
-        fontWeight: active ? 600 : 400,
-      }}
-    >
-      {icon}
-      {children}
-    </button>
-  )
-}
-
-function FilterChip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      style={{
-        padding: '4px 10px',
-        fontSize: 11.5,
-        borderRadius: 999,
-        cursor: 'pointer',
-        fontFamily: 'inherit',
-        textTransform: 'capitalize',
-        border: `1px solid ${active ? 'var(--text)' : 'var(--border)'}`,
-        background: active ? 'var(--content-bg)' : 'var(--surface)',
-        color: active ? 'var(--text)' : 'var(--text-dim)',
-      }}
-    >
-      {children}
-    </button>
-  )
-}
-
-function Spinner() {
-  return (
-    <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-faint)' }}>
-      <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
-    </div>
-  )
-}
-
-function Banner({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        marginBottom: 14,
-        padding: '8px 12px',
-        borderRadius: 8,
-        fontSize: 12.5,
-        background: 'var(--badge-red-bg)',
-        color: 'var(--badge-red-text)',
-      }}
-    >
-      {children}
-    </div>
-  )
-}
-
-function Empty({
-  icon,
-  title,
-  hint,
-}: {
-  icon: React.ReactNode
-  title: string
-  hint: string
-}) {
-  return (
-    <div
-      style={{
-        border: '1px dashed var(--border-strong)',
-        borderRadius: 10,
-        padding: '48px 20px',
-        textAlign: 'center',
-        color: 'var(--text-dim)',
-      }}
-    >
-      <span style={{ color: 'var(--text-faint)', display: 'inline-block', marginBottom: 10 }}>
-        {icon}
-      </span>
-      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
-        {title}
-      </div>
-      <div style={{ fontSize: 12.5, maxWidth: 460, margin: '0 auto' }}>{hint}</div>
-    </div>
+    </SutrPageBody>
   )
 }

@@ -27,7 +27,7 @@ with Sutr(api_key="ap_...", base_url="https://sutr.example.com") as sutr:
 ```
 
 `api_key` and `base_url` fall back to `SUTR_API_KEY` and `SUTR_BASE_URL`.
-Create a key in the Sutr UI under **Settings → API Keys**.
+Create a key in the Sutr UI under **Develop → API Keys**.
 
 ## The approval flow
 

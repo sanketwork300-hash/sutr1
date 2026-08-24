@@ -2,7 +2,7 @@
  *  server field is never unreachable through the SDK. */
 
 export interface SutrOptions {
-  /** API key (create one under Settings → API Keys). Falls back to SUTR_API_KEY. */
+  /** API key (create one under Develop → API Keys). Falls back to SUTR_API_KEY. */
   apiKey?: string;
   /** Session JWT, as an alternative to an API key. */
   accessToken?: string;

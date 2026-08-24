@@ -55,7 +55,7 @@ export default function GoogleCallbackPage() {
     window.history.replaceState(null, '', '/login/google/callback')
     clearPendingVerification()
     setAuth(token)
-    navigate('/integrations', { replace: true })
+    navigate('/app/integrations', { replace: true })
   }, [setAuth, clearPendingVerification, navigate])
 
   if (errorCode) {

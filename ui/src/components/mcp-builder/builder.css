@@ -1,0 +1,155 @@
+/* The builder is a pipeline with a running summary beside it: the rail says
+   which stage you are in, the aside says what the pipeline has produced so
+   far. Both stay visible while the stage body scrolls. */
+
+.mb {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 264px;
+  gap: 20px;
+  align-items: start;
+  padding: 18px 22px 60px;
+  max-width: 1240px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.mb__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mb__aside {
+  position: sticky;
+  top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+@media (max-width: 1024px) {
+  .mb {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 14px 14px 48px;
+  }
+  .mb__aside {
+    position: static;
+    order: -1;
+  }
+}
+
+/* ── Progress rail ──────────────────────────────────────────────────────── */
+
+.mb__rail {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.mb__rail::-webkit-scrollbar {
+  display: none;
+}
+
+.mb__stage {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 108px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 12px;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: var(--text-faint);
+  cursor: default;
+  border-right: 1px solid var(--border);
+}
+
+.mb__stage:last-child {
+  border-right: none;
+}
+
+.mb__stage[data-done='true'] {
+  cursor: pointer;
+  color: var(--text-dim);
+}
+
+.mb__stage[data-done='true']:hover {
+  background: var(--surface-hover);
+}
+
+.mb__stage[data-active='true'] {
+  color: var(--text);
+  background: var(--content-bg);
+}
+
+.mb__stage[data-active='true']::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--brand);
+}
+
+.mb__stage-index {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.mb__stage-label {
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+/* ── Summary ────────────────────────────────────────────────────────────── */
+
+.mb__summary {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mb__summary-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.mb__summary-key {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.mb__summary-val {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 150px;
+}

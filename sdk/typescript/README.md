@@ -28,7 +28,7 @@ console.log(result.text);
 ```
 
 `apiKey` and `baseUrl` fall back to `SUTR_API_KEY` and `SUTR_BASE_URL`. Create a
-key in the Sutr UI under **Settings → API Keys**.
+key in the Sutr UI under **Develop → API Keys**.
 
 ## The approval flow
 

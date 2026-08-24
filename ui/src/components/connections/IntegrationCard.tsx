@@ -18,7 +18,7 @@ export function IntegrationCard({ integration, isInstalled, onConnect }: Props) 
 
   return (
     <div
-      onClick={() => !unavailable && navigate(`/integrations/${encodeURIComponent(slug)}`)}
+      onClick={() => !unavailable && navigate(`/app/integrations/${encodeURIComponent(slug)}`)}
       style={{
         display: 'flex',
         alignItems: 'center',

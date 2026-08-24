@@ -3,6 +3,7 @@ import { UserCog, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SutrPageHeader } from '@/components/sutr'
 import { api, setToken } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { IS_CLOUD } from '@/lib/env'
@@ -36,7 +37,7 @@ export default function AdminPage() {
   if (!isAdmin) {
     return (
       <>
-        <AdminHeader isMobile={isMobile} />
+        <AdminHeader />
         <div
           style={{
             flex: 1,
@@ -62,7 +63,7 @@ export default function AdminPage() {
 
   return (
     <>
-      <AdminHeader isMobile={isMobile} />
+      <AdminHeader />
       {tabs.length > 1 && (
         <div
           style={{
@@ -112,21 +113,13 @@ export default function AdminPage() {
   )
 }
 
-function AdminHeader({ isMobile }: { isMobile: boolean }) {
+function AdminHeader() {
   return (
-    <div
-      style={{
-        height: 44,
-        display: 'flex',
-        alignItems: 'center',
-        padding: `0 ${isMobile ? 14 : 20}px`,
-        borderBottom: '1px solid var(--border)',
-        background: 'var(--content-bg)',
-        flexShrink: 0,
-      }}
-    >
-      <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>Admin</span>
-    </div>
+    <SutrPageHeader
+      eyebrow="Instance"
+      title="Admin"
+      subtitle="Instance-wide settings, the sign-up waitlist, and user administration."
+    />
   )
 }
 

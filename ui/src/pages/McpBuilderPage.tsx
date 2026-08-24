@@ -17,6 +17,9 @@ import {
   Upload,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import '@/components/mcp-builder/builder.css'
+import { BuilderRail, BuilderSummary } from '@/components/mcp-builder/BuilderRail'
+import { SutrButton, SutrPageHeader } from '@/components/sutr'
 import {
   api,
   type OpenApiCompileResult,
@@ -37,7 +40,6 @@ import {
 } from '@/components/mcp-builder/primitives'
 import {
   authPreviewStyle,
-  backLinkStyle,
   bannerStyle,
   inputStyle,
   linkButtonStyle,
@@ -346,28 +348,35 @@ export default function McpBuilderPage() {
     setCreated(null)
   }, [selected, includeDeprecated, tokenHeader, tokenFormat, serverChoice, customServerUrl])
 
+  const selectedToolCount = selected.size || selectableIds.length
+
   return (
-    <div style={{ flex: 1, overflow: 'auto', background: 'var(--bg)', padding: '28px 24px 80px' }}>
-      <div style={{ maxWidth: 780, margin: '0 auto' }}>
-        <button type="button" onClick={() => navigate('/integrations')} style={backLinkStyle}>
-          <ArrowLeft size={13} /> Integrations
-        </button>
+    <div className="sutr-page">
+      <SutrPageHeader
+        eyebrow="Build"
+        title="MCP builder"
+        subtitle="Turn an OpenAPI specification into governed agent tools, one stage at a time."
+        actions={
+          <SutrButton variant="ghost" size="sm" onClick={() => navigate('/app/apis')}>
+            <ArrowLeft size={13} /> APIs
+          </SutrButton>
+        }
+      />
 
-        <h1 style={{ margin: '0 0 3px', fontSize: 19, fontWeight: 600, color: 'var(--text)' }}>
-          MCP builder
-        </h1>
-        <p style={{ margin: '0 0 18px', fontSize: 12.5, color: 'var(--text-dim)' }}>
-          Turn an OpenAPI specification into governed agent tools, one stage at a time.
-        </p>
+      <div className="mb">
+        <div className="mb__main">
+          <BuilderRail
+            stages={steps.map((id) => ({ id, label: STEP_LABELS[id] }))}
+            current={step}
+            onJump={(target) => setStep(target)}
+          />
 
-        <Stepper steps={steps} current={step} onJump={(target) => setStep(target)} />
-
-        {error && (
-          <div style={bannerStyle('error')}>
-            <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
-            <span>{error}</span>
-          </div>
-        )}
+          {error && (
+            <div style={bannerStyle('error')}>
+              <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>{error}</span>
+            </div>
+          )}
 
         {step === 'source' && (
           <SourceStep
@@ -482,7 +491,7 @@ export default function McpBuilderPage() {
             onDownload={handleDownload}
             onBack={() => setStep('auth')}
             onOpenIntegration={() =>
-              navigate(`/integrations/custom-api/${created?.integration_db_id}`)
+              navigate(`/app/integrations/custom-api/${created?.integration_db_id}`)
             }
             onDeploy={() => setStep('deploy')}
           />
@@ -494,13 +503,52 @@ export default function McpBuilderPage() {
             compileBody={compileBody}
             suggestedName={integrationName || project.name}
             onBack={() => setStep('build')}
-            onOpenDeployments={() => navigate('/deployments')}
+            onOpenDeployments={() => navigate('/app/deployments')}
           />
         )}
 
-        <p style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 14 }}>
-          Stage {stepIndex + 1} of {steps.length} · Nothing is created until the build stage.
-        </p>
+          <p style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+            Stage {stepIndex + 1} of {steps.length} · Nothing is created until the build stage.
+          </p>
+        </div>
+
+        <aside className="mb__aside">
+          <BuilderSummary
+            error={error || null}
+            warnings={project?.warnings.length ?? 0}
+            rows={[
+              { key: 'Source', value: sourceKind },
+              {
+                key: 'Specification',
+                value: project ? project.api_title || project.name : 'not imported',
+              },
+              { key: 'Version', value: project?.api_version || '—' },
+              {
+                key: 'Operations',
+                value: project ? String(project.operation_count) : '—',
+              },
+              {
+                key: 'Selected',
+                value: project ? `${selectedToolCount} tool${selectedToolCount === 1 ? '' : 's'}` : '—',
+              },
+              {
+                key: 'Auth',
+                value: tokenHeader ? tokenHeader : (project?.security_schemes?.length ?? 0) > 0 ? 'from spec' : 'none',
+              },
+              {
+                key: 'Server',
+                value: serverChoice || customServerUrl || project?.server_url || '—',
+              },
+            ]}
+            footer={
+              created?.integration_id ? (
+                <span className="sutr-meta" style={{ color: 'var(--green)' }}>
+                  Integration created: {created.integration_id}
+                </span>
+              ) : null
+            }
+          />
+        </aside>
       </div>
     </div>
   )
@@ -1429,80 +1477,5 @@ function BuildStep({
         </div>
       </Footer>
     </Card>
-  )
-}
-
-// ── Shared pieces ───────────────────────────────────────────────────────────
-
-function Stepper({
-  steps,
-  current,
-  onJump,
-}: {
-  steps: StepId[]
-  current: StepId
-  onJump: (step: StepId) => void
-}) {
-  const currentIndex = steps.indexOf(current)
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
-        flexWrap: 'wrap',
-        marginBottom: 16,
-      }}
-    >
-      {steps.map((step, index) => {
-        const done = index < currentIndex
-        const active = index === currentIndex
-        return (
-          <div key={step} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <button
-              type="button"
-              onClick={() => done && onJump(step)}
-              disabled={!done}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '4px 10px',
-                borderRadius: 999,
-                fontSize: 11.5,
-                fontFamily: 'inherit',
-                cursor: done ? 'pointer' : 'default',
-                border: `1px solid ${active ? 'var(--text)' : 'var(--border)'}`,
-                background: active ? 'var(--content-bg)' : 'var(--surface)',
-                color: active ? 'var(--text)' : done ? 'var(--text-dim)' : 'var(--text-faint)',
-                fontWeight: active ? 600 : 400,
-              }}
-            >
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 15,
-                  height: 15,
-                  borderRadius: '50%',
-                  fontSize: 9.5,
-                  fontWeight: 700,
-                  background: done || active ? 'var(--text)' : 'transparent',
-                  color: done || active ? 'var(--content-bg)' : 'var(--text-faint)',
-                  border: done || active ? 'none' : '1px solid var(--border-strong)',
-                }}
-              >
-                {done ? <Check size={9} /> : index + 1}
-              </span>
-              {STEP_LABELS[step]}
-            </button>
-            {index < steps.length - 1 && (
-              <ChevronRight size={12} style={{ color: 'var(--border-strong)' }} />
-            )}
-          </div>
-        )
-      })}
-    </div>
   )
 }

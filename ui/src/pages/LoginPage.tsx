@@ -2,13 +2,13 @@ import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { GoogleLoginButton } from '@/components/GoogleLoginButton'
+import { BrandLockup } from '@/components/shell/BrandMark'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ApiError, api, type EmailVerificationRequiredDetail } from '@/api/client'
 import { useMediaQuery } from '@/lib/useMediaQuery'
 import { useAuthStore } from '@/stores/auth'
 import { useEmailVerificationStore } from '@/stores/emailVerification'
-import { useThemeStore } from '@/stores/theme'
 
 function getVerificationDetail(err: unknown): EmailVerificationRequiredDetail | null {
   if (!(err instanceof ApiError)) return null
@@ -33,7 +33,6 @@ function getTotpError(err: unknown): 'totp_required' | 'totp_invalid' | null {
 export default function LoginPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const { theme } = useThemeStore()
   const setAuth = useAuthStore((s) => s.setAuth)
   const clearPendingVerification = useEmailVerificationStore((s) => s.clearPendingVerification)
   const startPendingVerification = useEmailVerificationStore((s) => s.startPendingVerification)
@@ -56,7 +55,7 @@ export default function LoginPage() {
       const res = await api.auth.login(email, password, totpCode || undefined)
       clearPendingVerification()
       setAuth(res.access_token)
-      navigate(redirect || '/integrations')
+      navigate(redirect || '/app')
     } catch (err) {
       const verificationDetail = getVerificationDetail(err)
       if (verificationDetail) {
@@ -90,28 +89,13 @@ export default function LoginPage() {
   const formContent = (
     <div style={formInnerStyle}>
       <div style={{ marginBottom: 28 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <img
-            src={
-              theme === 'dark'
-                ? '/logos/sutr-dark-mode.png'
-                : '/logos/sutr-light-mode.png'
-            }
-            alt="Sutr"
-            style={{ height: 22, width: 'auto' }}
-          />
-          <span
-            style={{
-              fontFamily: "'Space Grotesk', sans-serif",
-              fontSize: 18,
-              fontWeight: 600,
-              color: 'var(--text)',
-              letterSpacing: 0.3,
-            }}
-          >
-            Sutr
-          </span>
-        </div>
+        <Link
+          to="/"
+          aria-label="Swaraj Sutr home"
+          style={{ display: 'inline-block', marginBottom: 10 }}
+        >
+          <BrandLockup size={22} />
+        </Link>
         <h1
           style={{
             fontSize: isDesktop ? 26 : 24,
@@ -262,15 +246,34 @@ export default function LoginPage() {
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       <div style={formPanelStyle}>{formContent}</div>
       <div style={promoPanelStyle}>
-        <div style={{ textAlign: 'center' }}>
+        <div style={{ maxWidth: 380, display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <span className="sutr-eyebrow sutr-eyebrow--brand">Swaraj Sutr</span>
           <p style={promoLineStyle}>
-            <span style={{ color: 'var(--text)', fontWeight: 700 }}>More power</span>
-            <span style={{ color: 'var(--text-faint)' }}> for your agents</span>
+            The infrastructure layer for{' '}
+            <span style={{ color: 'var(--text)', fontWeight: 600 }}>governed AI agents</span>.
           </p>
-          <p style={promoLineStyle}>
-            <span style={{ color: 'var(--text-faint)' }}>More control </span>
-            <span style={{ color: 'var(--text)', fontWeight: 700 }}>for you</span>
-          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {['Identity', 'Policy', 'Approval', 'Execution', 'Audit'].map((step, index, all) => (
+              <span key={step} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <span
+                  style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 11,
+                    color: 'var(--text-dim)',
+                    border: '1px solid var(--border)',
+                    background: 'var(--surface)',
+                    borderRadius: 'var(--r-sm)',
+                    padding: '4px 9px',
+                  }}
+                >
+                  {step}
+                </span>
+                {index < all.length - 1 ? (
+                  <span style={{ color: 'var(--text-faint)' }}>→</span>
+                ) : null}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -325,11 +328,12 @@ const promoPanelStyle: React.CSSProperties = {
 }
 
 const promoLineStyle: React.CSSProperties = {
-  fontSize: 22,
+  fontSize: 24,
   fontWeight: 400,
-  lineHeight: 1.5,
+  lineHeight: 1.35,
+  letterSpacing: '-0.02em',
+  color: 'var(--text-dim)',
   margin: 0,
-  whiteSpace: 'nowrap',
 }
 
 const labelStyle: React.CSSProperties = {

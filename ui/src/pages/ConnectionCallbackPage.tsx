@@ -32,7 +32,7 @@ export default function ConnectionCallbackPage() {
       const timer = window.setTimeout(() => setClosing(false), 600)
       return () => window.clearTimeout(timer)
     }
-    const timer = window.setTimeout(() => navigate('/settings', { replace: true }), 1800)
+    const timer = window.setTimeout(() => navigate('/app/credentials', { replace: true }), 1800)
     return () => window.clearTimeout(timer)
   }, [detail, navigate, provider, status])
 

@@ -26,7 +26,7 @@ authCommand
 
 authCommand
   .command("login")
-  .description("Authenticate the CLI with an API key (create one at Settings → API Keys)")
+  .description("Authenticate the CLI with an API key (create one at Develop → API Keys)")
   .option("--api-key <key>", "API key to authenticate with")
   .option("-o, --output <format>", "Output format")
   .action((opts: { apiKey?: string; output: string }) => {
@@ -38,7 +38,7 @@ authCommand
       // REST API, and the CLI has no separate REST OAuth issuer yet. API keys
       // are the supported CLI credential until that lands.
       printError(
-        "ap auth login now requires --api-key. Create one in the web UI under Settings → API Keys.",
+        "ap auth login now requires --api-key. Create one in the web UI under Develop → API Keys.",
         1,
       );
     }

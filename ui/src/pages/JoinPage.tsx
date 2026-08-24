@@ -47,9 +47,9 @@ export default function JoinPage() {
       const res = await api.orgInvitations.accept(token, withPassword ? password : undefined)
       if (res.access_token) setAuth(res.access_token)
       if (res.access_token || authToken) {
-        navigate('/integrations')
+        navigate('/app/integrations')
       } else {
-        navigate(`/login?redirect=${encodeURIComponent('/integrations')}`)
+        navigate(`/login?redirect=${encodeURIComponent('/app/integrations')}`)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not accept the invitation')
