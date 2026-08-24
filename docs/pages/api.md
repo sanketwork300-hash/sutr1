@@ -5,7 +5,7 @@ title: API Reference
 
 The server runs on port `4747` by default. Interactive docs (Swagger UI) are available at `http://localhost:4747/docs`.
 
-All endpoints except `/api/users/register`, `POST /api/auth/token`, `GET /api/auth/verify-email`, `POST /api/auth/verify-email-code`, `POST /api/auth/resend-verification-code`, `POST /api/auth/resend-verification-by-email`, `GET /api/auth/callback`, `GET /api/auth/google/login`, `GET /api/auth/google/callback`, and `GET /api/integrations` require authentication. Pass a bearer token in every request:
+All endpoints except `/api/users/register`, `POST /api/auth/token`, `GET /api/auth/verify-email`, `POST /api/auth/verify-email-code`, `POST /api/auth/resend-verification-code`, `POST /api/auth/resend-verification-by-email`, `GET /api/auth/callback`, `GET /api/auth/google/login`, `GET /api/auth/google/callback`, `GET /api/connections/{provider}/callback`, and `GET /api/integrations` require authentication. Pass a bearer token in every request:
 
 ```
 Authorization: Bearer <token>
@@ -332,6 +332,116 @@ only for this request and is not persisted.
 
 ---
 
+## Connected accounts
+
+OAuth grants Sutr holds on your behalf: GitHub for reading OpenAPI specifications out of
+repositories, and Google Cloud / Azure / AWS for running generated MCP servers in your own
+account. See [Connected accounts](/connected-accounts) for the concepts and
+[the setup guide](/self-host/connected-accounts) for registering the OAuth apps.
+
+A connection is scoped to one **user** inside one organization. An API key cannot open one —
+it belongs to the organization, not to a person, so the connection would have no identity to
+revoke. GitHub connections require `integrations:manage`; cloud connections require
+`deployments:manage`. Tokens are stored through the secrets backend and never returned.
+
+### `GET /api/connections`
+
+Every provider this build knows, whether the server has it configured, and who is connected.
+
+```json
+{
+  "providers": [
+    {
+      "id": "github", "display_name": "GitHub", "kind": "source",
+      "flow": "authorization_code", "scopes": "repo read:user",
+      "configured": true, "reason": null,
+      "setup_url": "https://github.com/settings/developers",
+      "grant_summary": "Read the repositories you can already see, ...",
+      "callback_url": "http://localhost:4747/api/connections/github/callback",
+      "connection": {
+        "id": "…", "provider": "github", "account_label": "octocat",
+        "scopes": "repo", "expires_at": null, "expired": false,
+        "metadata": {}, "created_at": "…", "updated_at": "…"
+      }
+    }
+  ]
+}
+```
+
+`configured: false` carries a `reason` naming the exact environment variables and callback URL
+the operator must set — an unconfigured provider is the operator's missing setup, not a broken
+button.
+
+### `POST /api/connections/{provider}/authorize`
+
+Begin a connection. `provider` is `github`, `gcp`, `azure`, or `aws`.
+
+**Body:** `{"redirect_after": "/connections/callback"}` — a **relative** UI path to return to.
+Anything else is discarded rather than sanitized.
+
+For the authorization-code providers:
+
+```json
+{"flow": "authorization_code", "authorization_url": "https://github.com/login/oauth/authorize?…",
+ "grant_summary": "…"}
+```
+
+For AWS, which uses the OAuth 2.0 device grant (RFC 8628) against IAM Identity Center:
+
+```json
+{"flow": "device", "state": "…", "user_code": "ABCD-EFGH",
+ "verification_uri": "https://device.sso.us-east-1.amazonaws.com/",
+ "verification_uri_complete": "https://…?user_code=ABCD-EFGH",
+ "interval": 5, "expires_in": 600, "grant_summary": "…"}
+```
+
+`503` with `{"error": "provider_not_configured"}` when the server has no OAuth app for it.
+
+### `GET /api/connections/{provider}/callback`
+
+Where the provider redirects the browser. **No auth** — the `state` parameter is the only thing
+binding the code to a user, so the state row is single-use, expires after 15 minutes, and is
+deleted before the code is exchanged whatever the outcome. Always responds `302` back into the
+UI with `connection`, `connection_status` (`connected` | `denied` | `error`), and on failure
+`connection_error`.
+
+### `POST /api/connections/aws/poll`
+
+One step of the AWS device grant. **Body:** `{"state": "…"}`.
+
+Returns `{"status": "pending"}` while the user has not approved yet — that is a normal state of a
+flow in progress, not an error — and `{"status": "connected", "connection": {…}}` once Identity
+Center issues the token. Only the Identity Center token is stored; every AWS operation exchanges
+it for short-lived role credentials.
+
+### `GET /api/connections/github/repos?q=`
+
+Repositories the connected GitHub account can read, most recently updated first, filtered by `q`.
+`409` with `{"error": "not_connected"}` when there is no GitHub connection.
+
+### `GET /api/connections/{connection_id}/targets`
+
+Where a cloud connection can deploy: Google Cloud projects, Azure subscriptions, or AWS accounts
+(each with the Identity Center roles assigned to you in it).
+
+```json
+{"provider": "aws", "targets": [
+  {"id": "111122223333", "label": "Prod (111122223333)", "detail": "ops@acme.com",
+   "roles": ["AdministratorAccess", "ReadOnly"]}
+]}
+```
+
+`400` for a source provider — GitHub has no deploy targets.
+
+### `DELETE /api/connections/{connection_id}`
+
+Deletes the stored tokens. **Does not revoke the app** on the provider's side; only the user can
+do that from the provider's own settings. `204`.
+
+CLI equivalents: `sutr connections list|connect|targets|disconnect`.
+
+---
+
 ## OpenAPI projects
 
 Import an OpenAPI 3.x document and compile it into a custom API integration. The generated tools flow through the same install/discovery/approval/execution pipeline as every other integration.
@@ -351,9 +461,9 @@ Import a specification. Requires `integrations:manage`.
 
 `source_kind` is one of `paste`, `upload`, `url`, `github`, or `swaggerhub`.
 
-- **`paste` / `upload`** — the document arrives in `content`.
+- **`paste` / `upload`** — the document arrives in `content`. For `upload`, pass `filename` too: it is kept as the project's provenance, which is the only record a local import has of where it came from.
 - **`url`** — a direct link to the document. SSRF-screened (no private, loopback, or link-local targets), redirects are not followed, and the response is size-capped.
-- **`github`** — `url` is any GitHub repository, tree, blob, or `raw.githubusercontent.com` link. If it does not already name a file, Sutr picks the best candidate itself (see `/discover` below). Pass `path` to choose a specific file, and `github_token` for a private repository. The token is used for that one request and never stored.
+- **`github`** — `url` is any GitHub repository, tree, blob, or `raw.githubusercontent.com` link. If it does not already name a file, Sutr picks the best candidate itself (see `/discover` below). Pass `path` to choose a specific file. For a private repository, either set `use_connection: true` to authorize with the caller's [connected GitHub account](/connected-accounts), or pass `github_token` — an explicit token always wins, and is used for that one request and never stored.
 - **`swaggerhub`** — `url` is a SwaggerHub API URL (`app.`, `portal.`, or `api.swaggerhub.com`, in `/apis/{owner}/{api}/{version}` form). Pass `swaggerhub_api_key` for a private API; SwaggerHub expects the key as-is, so Sutr sends it unprefixed rather than as a Bearer token. `resolved` (default `true`) asks SwaggerHub to inline `$ref`s before returning the document.
 
 Provider credentials are pinned to their provider's host: a `github_token` is only ever attached to a request whose host already resolved to GitHub, and likewise for SwaggerHub. In every case the document is validated against the official OpenAPI 3.0/3.1 schemas, `$ref`s are resolved cycle-safely, external `$ref`s are refused, and Swagger 2.0 is rejected.
@@ -364,7 +474,7 @@ Provider credentials are pinned to their provider's host: a `github_token` is on
 
 List the specification files in a GitHub repository before importing one. Requires `integrations:manage`.
 
-**Body:** `{"url": "https://github.com/owner/repo", "github_token": "<optional>"}`
+**Body:** `{"url": "https://github.com/owner/repo", "use_connection": false, "github_token": "<optional>"}`
 
 Resolves the repository's default branch when the URL names none, walks the tree once, and returns the spec-shaped files it found:
 
@@ -423,7 +533,24 @@ CLI equivalents: `sutr openapi discover|import|list|show|compile|package|delete`
 
 ## Deployments
 
-Run generated MCP servers on a deployment provider. The local Docker provider builds the package into an image and runs it as a container bound to `127.0.0.1` on an ephemeral port, serving MCP at `/mcp` and a health probe at `/health`. It is disabled on cloud instances and can be turned off with `DEPLOY_DOCKER_ENABLED=false`. Kubernetes / Argo CD / Swaraj Cloud providers plug into the same interface.
+Run generated MCP servers on a deployment provider. Four ship:
+
+| Provider | What it creates | Authorized by |
+|---|---|---|
+| `docker` | A container on the Sutr host, bound to `127.0.0.1` on an ephemeral port | nothing — the host's own daemon |
+| `gcp` | Artifact Registry repo (if missing) → Cloud Build build → public Cloud Run service | a `gcp` connected account |
+| `azure` | Resource group, registry, environment (each if missing) → ACR Tasks build → Container App | an `azure` connected account |
+| `aws` | S3 bucket and ECR repo (if missing) → CodeBuild build → App Runner service | an `aws` connected account |
+
+Every provider serves MCP at `/mcp` and a health probe at `/health`. The cloud providers build the
+image with that cloud's own build service and run it on its serverless container runtime, scaling
+to zero when idle; because they act with the user's own OAuth grant, a deployment can only ever
+touch what that user could already touch.
+
+`docker` is disabled on cloud (multi-tenant) instances and can be turned off with
+`DEPLOY_DOCKER_ENABLED=false`. Each cloud provider can be turned off with
+`DEPLOY_GCP_ENABLED` / `DEPLOY_AZURE_ENABLED` / `DEPLOY_AWS_ENABLED`, and reports itself
+unavailable — with the missing variables named — when its OAuth app is not configured.
 
 All mutations require `deployments:manage` (owner/admin/developer) and are audited. The optional upstream `token` is stored through the secrets backend and injected as an environment variable at run time — never baked into the image or the package.
 
@@ -433,23 +560,42 @@ All mutations require `deployments:manage` (owner/admin/developer) and are audit
 {
   "project_id": "<openapi project uuid>",
   "name": "Petstore prod",
-  "provider": "docker",
+  "provider": "gcp",
+  "connection_id": "<provider connection uuid>",
+  "provider_config": {"project": "acme-prod", "region": "us-central1"},
   "token": "sk_live_...",
   "compile": { "filters": {"exclude_tags": ["admin"]}, "server_url": "https://api.example.com" }
 }
 ```
 
-Returns `201` with `status: "queued"`; the build runs in the background (`queued → building → running | failed`). Poll `GET /api/deployments/{id}`.
+`connection_id` is required for every provider that declares a `connection_provider`, and must be
+a connection belonging to the caller — a connection is a personal grant, so one member cannot
+deploy under another's cloud identity.
+
+`provider_config` carries the placement. Its keys come from the provider's own `config_fields`
+(see `GET /api/deployments/providers`), so a new provider needs no client change. Declared
+defaults are filled in and stored alongside the values you sent, so the recorded config is the
+whole truth and a later stop, start, or delete addresses the same target. Missing required fields
+are rejected before anything is created, and the provider's readiness is probed with real
+credentials — "ready" means ready, not merely "configured".
+
+Returns `201` with `status: "queued"`; the build runs in the background
+(`queued → building → running | failed`). A cloud build takes a few minutes. Poll
+`GET /api/deployments/{id}`.
 
 ### Other endpoints
 
-- `GET /api/deployments` / `GET /api/deployments/{id}` — list/detail; stored status is reconciled with the provider's live state.
-- `GET /api/deployments/providers` — provider availability.
-- `GET /api/deployments/{id}/logs?tail=100` — container logs.
-- `POST /api/deployments/{id}/stop` / `/start` — lifecycle.
-- `DELETE /api/deployments/{id}` — removes the container and image, deletes the stored token.
+- `GET /api/deployments` / `GET /api/deployments/{id}` — list/detail; stored status is reconciled with the provider's live state. Includes `connection_id`, the stored `config`, and `console_url` (a deep link into the cloud's own console) where there is one.
+- `GET /api/deployments/providers` — availability plus, for each provider, `connection_provider`, a one-sentence `creates`, and the `config_fields` a client must collect (each with `kind`, `required`, `default`, and `help`).
+- `GET /api/deployments/{id}/logs?tail=100` — logs. Cloud Run reads Cloud Logging and App Runner reads CloudWatch; **Azure Container Apps keeps application logs in Log Analytics**, a different API with a different token audience than this grant covers, so it returns a portal link instead of an empty string.
+- `POST /api/deployments/{id}/stop` / `/start` — lifecycle. Container Apps and App Runner have real stop/pause operations. Cloud Run has no stopped state — it already scales to zero — so *stop* switches ingress to internal-only, which makes it genuinely unreachable without destroying the revision.
+- `DELETE /api/deployments/{id}` — removes what belongs to that deployment and deletes the stored token. Shared resources (resource group, registry, environment, bucket, ECR repository) are deliberately left alone.
+
+Every provider operation resolves credentials fresh: an OAuth access token refreshed if due, or —
+for AWS — the Identity Center token exchanged for short-lived role credentials.
 
 CLI equivalents: `sutr deploy providers|list|create|status|logs|stop|start|delete`.
+`sutr deploy create --provider gcp --connection <id> --config project=acme --config region=us-central1`.
 
 ---
 

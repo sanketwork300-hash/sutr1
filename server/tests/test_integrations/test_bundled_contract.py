@@ -35,8 +35,11 @@ _JSON_TYPES = {"string", "number", "integer", "boolean", "array", "object"}
 
 
 def test_catalog_size_and_uniqueness():
-    assert len(_INTEGRATIONS) == 49
-    assert len(set(IDS)) == 49
+    # A deliberate tripwire: adding or removing a bundled integration should be
+    # a conscious edit here, not something that drifts in unnoticed.
+    # 49 originally + 10 of Google's hosted MCP servers (2026-08-21).
+    assert len(_INTEGRATIONS) == 59
+    assert len(set(IDS)) == 59
 
 
 @pytest.mark.parametrize("integration", ALL, ids=IDS)

@@ -10,7 +10,9 @@ class Deployment(SQLModel, table=True):
     The package zip is snapshotted at create time so the deployment is
     reproducible even if the source OpenAPI project changes or is deleted.
     `provider_state_json` is the provider's opaque handle dict (container id,
-    URL, ...) — the schema never learns provider internals.
+    URL, ...) — the schema never learns provider internals. `config_json` is
+    the opposite direction: what the user chose *before* the deploy, kept so
+    the same target can be addressed again later.
     """
 
     __tablename__ = "deployment"
@@ -20,7 +22,14 @@ class Deployment(SQLModel, table=True):
     project_id: uuid.UUID | None = Field(default=None, foreign_key="openapi_project.id")
     name: str
     slug: str
-    provider: str  # "docker" (kubernetes/argocd/swaraj later)
+    provider: str  # "docker" | "gcp" | "azure" | "aws"
+    # Which connected account authorizes this deployment's provider. None for
+    # the local Docker provider, which runs on the sutr host itself.
+    connection_id: uuid.UUID | None = Field(default=None, foreign_key="provider_connection.id")
+    # The user's placement choice (project/subscription/account, region, ...),
+    # snapshotted so a later stop/start/delete does not depend on the builder
+    # form still being open, or on the values still being defaults.
+    config_json: str = Field(default="{}")
     # queued | building | running | stopped | failed
     status: str = Field(default="queued")
     url: str | None = None

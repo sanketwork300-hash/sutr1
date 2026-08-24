@@ -5,7 +5,7 @@ import uuid
 
 import pytest
 
-from sutr.deploy.base import DeploySpec, ProviderError
+from sutr.deploy.base import DeploySpec, ProviderError, ProviderTarget
 from sutr.deploy.docker_provider import DockerProvider
 from sutr.openapi.packaging import build_server_package
 from tests.test_openapi.test_packaging import TOOLS
@@ -21,6 +21,11 @@ def _package() -> bytes:
         api_title="Petstore",
         api_version="1.2.0",
     )[1]
+
+
+# The local provider ignores the target entirely; it exists so every
+# provider shares one call signature.
+TARGET = ProviderTarget()
 
 
 class FakeCli:
@@ -92,17 +97,17 @@ async def test_status_parsing(provider):
     state = {"container_name": "sutr-x-abc"}
 
     fake.outputs["inspect"] = "running|"
-    assert (await provider.status(state)).state == "running"
+    assert (await provider.status(state, TARGET)).state == "running"
 
     fake.outputs["inspect"] = "exited|oom killed"
-    result = await provider.status(state)
+    result = await provider.status(state, TARGET)
     assert result.state == "stopped"
     assert "oom killed" in result.detail
 
     fake.errors["inspect"] = "docker inspect failed: No such object: sutr-x-abc"
-    assert (await provider.status(state)).state == "not_found"
+    assert (await provider.status(state, TARGET)).state == "not_found"
 
-    assert (await provider.status({})).state == "not_found"
+    assert (await provider.status({}, TARGET)).state == "not_found"
 
 
 async def test_remove_is_idempotent_and_cleans_image(provider):
@@ -110,13 +115,13 @@ async def test_remove_is_idempotent_and_cleans_image(provider):
     fake.errors["rm"] = "no such container"
     fake.errors["rmi"] = "no such image"
     # Errors on both are swallowed — remove never raises.
-    await provider.remove({"container_name": "gone", "image_tag": "gone:1"})
+    await provider.remove({"container_name": "gone", "image_tag": "gone:1"}, TARGET)
     assert ("rm", "-f", "gone") in fake.commands
     assert ("rmi", "gone:1") in fake.commands
 
 
 async def test_available_reports_daemon_errors(provider):
     provider._fake.errors["version"] = "docker version failed: cannot connect to the daemon"
-    ok, reason = await provider.available()
+    ok, reason = await provider.available(TARGET)
     assert not ok
     assert "daemon" in reason

@@ -2,14 +2,19 @@
     "items": [
         {
             "section": "Introduction",
-            "items": ["index", "getting-started", "why"]
+            "items": [
+                "index",
+                "getting-started",
+                "why"
+            ]
         },
         {
             "section": "Self-host",
             "items": [
                 "self-host/install",
                 "self-host/configure",
-                "self-host/google-oauth-setup"
+                "self-host/google-oauth-setup",
+                "self-host/connected-accounts"
             ]
         },
         {
@@ -23,7 +28,12 @@
         },
         {
             "section": "Reference",
-            "items": ["api", "tool-approvals"]
+            "items": [
+                "mcp-builder",
+                "connected-accounts",
+                "api",
+                "tool-approvals"
+            ]
         },
         {
             "section": "Agents",

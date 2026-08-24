@@ -22,7 +22,13 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from sutr.deploy.base import DeploymentProvider, DeploySpec, ProviderError, ProviderStatus
+from sutr.deploy.base import (
+    DeploymentProvider,
+    DeploySpec,
+    ProviderError,
+    ProviderStatus,
+    ProviderTarget,
+)
 
 _BUILD_TIMEOUT = 900  # first build pulls the python base image
 _CMD_TIMEOUT = 60
@@ -31,6 +37,8 @@ _CMD_TIMEOUT = 60
 class DockerProvider(DeploymentProvider):
     id = "docker"
     display_name = "Local Docker"
+    connection_provider = None
+    creates = "A container on this host's Docker daemon, bound to 127.0.0.1."
 
     async def _run(self, *args: str, timeout: int = _CMD_TIMEOUT) -> str:
         """Run a docker CLI command; returns stdout, raises ProviderError."""
@@ -53,7 +61,7 @@ class DockerProvider(DeploymentProvider):
             raise ProviderError(f"docker {args[0]} failed: {detail[:2000]}")
         return stdout.decode("utf-8", errors="replace").strip()
 
-    async def available(self) -> tuple[bool, str | None]:
+    async def available(self, target: ProviderTarget | None = None) -> tuple[bool, str | None]:
         try:
             await self._run("version", "--format", "{{.Server.Version}}", timeout=20)
             return True, None
@@ -125,7 +133,7 @@ class DockerProvider(DeploymentProvider):
         except ProviderError:
             pass
 
-    async def status(self, state: dict) -> ProviderStatus:
+    async def status(self, state: dict, target: ProviderTarget) -> ProviderStatus:
         name = state.get("container_name")
         if not name:
             return ProviderStatus(state="not_found", detail="No container recorded.")
@@ -144,13 +152,13 @@ class DockerProvider(DeploymentProvider):
             )
         return ProviderStatus(state="error", detail=f"unexpected state '{docker_state}'")
 
-    async def start(self, state: dict) -> None:
+    async def start(self, state: dict, target: ProviderTarget) -> None:
         await self._run("start", state["container_name"])
 
-    async def stop(self, state: dict) -> None:
+    async def stop(self, state: dict, target: ProviderTarget) -> None:
         await self._run("stop", state["container_name"])
 
-    async def remove(self, state: dict) -> None:
+    async def remove(self, state: dict, target: ProviderTarget) -> None:
         name = state.get("container_name")
         if name:
             await self._silent("rm", "-f", name)
@@ -158,7 +166,7 @@ class DockerProvider(DeploymentProvider):
         if image:
             await self._silent("rmi", image)
 
-    async def logs(self, state: dict, tail: int = 100) -> str:
+    async def logs(self, state: dict, target: ProviderTarget, tail: int = 100) -> str:
         name = state.get("container_name")
         if not name:
             return ""

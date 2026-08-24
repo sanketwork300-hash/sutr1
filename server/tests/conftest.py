@@ -23,9 +23,11 @@ from sutr.models.integration import InstalledIntegration  # noqa: F401
 from sutr.models.log import LogEntry  # noqa: F401
 from sutr.models.oauth import OAuthState  # noqa: F401
 from sutr.models.oauth_client import OAuthClient  # noqa: F401
+from sutr.models.oauth_connect_state import OAuthConnectState  # noqa: F401
 from sutr.models.oauth_revoked_token import OAuthRevokedToken  # noqa: F401
 from sutr.models.org import Org
 from sutr.models.org_membership import OrgMembership
+from sutr.models.provider_connection import ProviderConnection  # noqa: F401
 from sutr.models.secret import Secret  # noqa: F401
 from sutr.models.subscription import Subscription  # noqa: F401
 from sutr.models.tool_approval_request import ToolApprovalRequest  # noqa: F401

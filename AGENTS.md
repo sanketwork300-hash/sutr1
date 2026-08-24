@@ -73,6 +73,46 @@ This is a hard rule, not a preference:
 | `remote_mcp` | MCP server hosted by vendor, connect via HTTP | PostHog, GitHub |
 | `custom` | Plain REST API, proxy makes HTTP calls and presents as MCP tools | Stripe (via OpenAPI) |
 
+A `custom` integration is always produced by the MCP builder from an OpenAPI specification —
+the hand-rolled builder was removed, because deriving paths, parameters, and auth from a
+document beats asking someone to retype them.
+
+## Connected Accounts
+
+OAuth grants sutr holds on a user's behalf, in `server/src/sutr/connections/`. Two uses, one
+mechanism: **GitHub** authorizes reading specifications out of repositories, and **Google Cloud
+/ Azure / AWS** authorize running generated MCP servers in the user's own account.
+
+Rules that must hold:
+
+- A connection is scoped to `(org, user, provider)`. It is a *personal* grant: another member
+  must never be able to borrow it, and an API key cannot open one (it has no identity to revoke).
+- Tokens live in `secret` rows through the configured secrets backend. The `provider_connection`
+  row holds pointers, an expiry, and a display label — never a token.
+- Everything that needs a token calls `connections.store.access_token()`, which refreshes when
+  due. No caller decides whether a refresh is needed.
+- The callback's `redirect_after` must be a relative path. An open redirect there turns an OAuth
+  flow into a phishing hop.
+- **AWS has no OAuth for its own service APIs.** The OAuth path for AWS is IAM Identity Center's
+  `sso-oidc` device grant (RFC 8628); only that token is stored, and each operation exchanges it
+  for short-lived role credentials.
+
+## Deployment Providers
+
+`server/src/sutr/deploy/` — one narrow interface, four implementations:
+
+| id | Target | Pipeline |
+|----|--------|----------|
+| `docker` | The sutr host's own daemon | build image → run container on 127.0.0.1 |
+| `gcp` | Cloud Run | GCS upload → Cloud Build → Artifact Registry → Cloud Run |
+| `azure` | Container Apps | ACR source upload → ACR Task → Container Apps |
+| `aws` | App Runner | S3 → CodeBuild → ECR → App Runner |
+
+A provider declares its own `config_fields`, so the builder renders its form without knowing the
+provider; adding a provider is a server change only. Credentials are never cached on the
+deployment row — `deploy/credentials.py` resolves them fresh for every operation, because cloud
+credentials are short-lived by design.
+
 ## Documentation (`docs/`)
 
 The `docs/` directory is a [teeny](https://github.com/yakkomajuri/teeny) static site — it's the source of truth for anything a developer or agent needs to understand the system beyond the code itself. **Keep it updated** — if you add an endpoint, change a data model, or introduce a new integration type, update the relevant doc file in the same PR/commit.
@@ -106,7 +146,9 @@ sutr/
 │       ├── mcp/        ← MCP server + proxy + upstream client
 │       ├── integrations/
 │       │   └── bundled/  ← one file per integration
-│       └── openapi/    ← OpenAPI spec → tool list generator
+│       ├── openapi/    ← OpenAPI spec → tool list generator (+ sources.py, packaging.py)
+│       ├── connections/← connected accounts (OAuth grants for sources + deploy targets)
+│       └── deploy/     ← deployment providers: docker, gcp, azure, aws/
 └── cli/                ← TypeScript / Commander.js
     ├── package.json
     └── src/

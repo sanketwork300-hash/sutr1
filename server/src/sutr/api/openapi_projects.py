@@ -21,6 +21,8 @@ from sutr.api.custom_api import (
     _validate_base_url,
 )
 from sutr.authz import ensure_agent_can
+from sutr.connections.errors import ConnectError
+from sutr.connections.store import access_token, find_connection
 from sutr.db import get_session
 from sutr.dependencies import AgentAuth, get_agent_auth
 from sutr.mcp.notifications import notify_tools_changed
@@ -68,9 +70,16 @@ class ImportRequest(BaseModel):
     content: str | None = None
     url: str | None = None
     workspace_id: uuid.UUID | None = None
+    # upload: the original filename, kept as provenance so a project imported
+    # from a file is still traceable to one.
+    filename: str | None = Field(default=None, max_length=255)
     # github: pick one file when a repository holds several. Omit to
     # auto-discover the conventional spec file.
     path: str | None = Field(default=None, max_length=500)
+    # Use the caller's stored GitHub connection instead of a pasted token.
+    # An explicit `github_token` always wins, so a one-off token still works
+    # for a user who happens to have connected an account.
+    use_connection: bool = False
     # Credentials for private sources. Used for this request only and never
     # stored: re-supply them if you re-import.
     github_token: str | None = Field(default=None, max_length=500)
@@ -83,7 +92,49 @@ class DiscoverRequest(BaseModel):
     """Look inside a GitHub repository before importing anything."""
 
     url: str = Field(min_length=1, max_length=2000)
+    use_connection: bool = False
     github_token: str | None = Field(default=None, max_length=500)
+
+
+async def _resolve_github_token(
+    session: Session,
+    agent_auth: AgentAuth,
+    *,
+    explicit: str | None,
+    use_connection: bool,
+) -> str | None:
+    """Which GitHub credential this request travels with, if any.
+
+    Precedence is deliberate: a pasted token beats a stored connection, and
+    neither is invented. Anonymous GitHub access still works for public
+    repositories, which is why "no credential" is a valid answer rather than
+    an error.
+    """
+    if explicit:
+        return explicit
+    if not use_connection:
+        return None
+    if agent_auth.user is None:
+        raise HTTPException(
+            status_code=403,
+            detail="A connected GitHub account belongs to a user; an API key must "
+            "pass github_token instead.",
+        )
+    connection = find_connection(
+        session, org_id=agent_auth.org.id, user_id=agent_auth.user.id, provider="github"
+    )
+    if connection is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "not_connected",
+                "message": "No GitHub account is connected. Connect one, or paste a token.",
+            },
+        )
+    try:
+        return await access_token(session, connection)
+    except ConnectError as exc:
+        raise HTTPException(status_code=400, detail={"error": exc.code, "message": exc.message})
 
 
 SOURCE_KINDS = ("paste", "upload", "url", "github", "swaggerhub")
@@ -238,6 +289,16 @@ async def import_spec(
 
     source_url = body.url if source_kind in ("url", "github", "swaggerhub") else None
     provenance: dict = {}
+    github_token = (
+        await _resolve_github_token(
+            session,
+            agent_auth,
+            explicit=body.github_token,
+            use_connection=body.use_connection,
+        )
+        if source_kind == "github"
+        else None
+    )
 
     try:
         if source_kind == "github":
@@ -246,7 +307,7 @@ async def import_spec(
                     status_code=400,
                     detail="url is required — paste a GitHub repository or file URL",
                 )
-            fetched = await fetch_from_github(body.url, path=body.path, token=body.github_token)
+            fetched = await fetch_from_github(body.url, path=body.path, token=github_token)
             spec_text, source_url, provenance = (
                 fetched.content,
                 fetched.source_url,
@@ -273,6 +334,8 @@ async def import_spec(
             if not body.content:
                 raise HTTPException(status_code=400, detail="content is required")
             spec_text = body.content
+            if source_kind == "upload" and body.filename:
+                provenance = {"filename": body.filename}
 
         document = parse_spec_text(spec_text)
         definition = normalize(document)
@@ -318,6 +381,9 @@ async def discover_specs(
     instead of silently picking one. Nothing is stored.
     """
     ensure_agent_can(session, agent_auth, "integrations:manage")
+    token = await _resolve_github_token(
+        session, agent_auth, explicit=body.github_token, use_connection=body.use_connection
+    )
     try:
         kind = detect_source_kind(body.url)
         if kind != "github":
@@ -327,7 +393,7 @@ async def discover_specs(
                 "direct URL, import the specification straight away.",
             )
         target = parse_github_url(body.url)
-        candidates, branch = await discover_github_specs(target, body.github_token)
+        candidates, branch = await discover_github_specs(target, token)
     except OpenAPIError as exc:
         raise _http_error(exc)
 

@@ -16,6 +16,7 @@ from sutr.openapi.sources import (
     discover_github_specs,
     fetch_from_github,
     fetch_from_swaggerhub,
+    list_github_repositories,
     parse_github_url,
     parse_swaggerhub_url,
 )
@@ -316,3 +317,49 @@ def test_conventional_filename_list_is_ordered_by_preference():
     depends on this order, so pin it."""
     assert SPEC_FILENAMES[0] == "openapi.yaml"
     assert SPEC_FILENAMES.index("openapi.json") < SPEC_FILENAMES.index("swagger.yaml")
+
+
+# ── repository listing (connected accounts) ──────────────────────────────────
+
+
+async def test_repository_listing_requires_a_credential():
+    """There is no "my repositories" for an anonymous caller, so this is a
+    configuration error rather than an empty list."""
+    with pytest.raises(OpenAPIError) as excinfo:
+        await list_github_repositories("")
+    assert excinfo.value.code == "github_auth"
+
+
+async def test_repository_listing_returns_what_the_picker_needs(monkeypatch):
+    async def fake(path, token):
+        assert token == "gho_connected"
+        assert "affiliation=owner,collaborator,organization_member" in path
+        assert "sort=updated" in path
+        return [
+            {
+                "full_name": "acme/api",
+                "html_url": "https://github.com/acme/api",
+                "private": True,
+                "default_branch": "trunk",
+                "description": "Public API",
+                "updated_at": "2026-08-01T00:00:00Z",
+            },
+            {"full_name": "acme/website", "private": False},
+        ]
+
+    monkeypatch.setattr("sutr.openapi.sources._github_json", fake)
+    repos = await list_github_repositories("gho_connected")
+    assert [repo["full_name"] for repo in repos] == ["acme/api", "acme/website"]
+    assert repos[0]["default_branch"] == "trunk"
+    # A repository without an html_url still gets a usable one.
+    assert repos[1]["html_url"] == "https://github.com/acme/website"
+    assert repos[1]["default_branch"] == "main"
+
+
+async def test_repository_listing_filters_client_side(monkeypatch):
+    async def fake(path, token):
+        return [{"full_name": "acme/api"}, {"full_name": "acme/website"}]
+
+    monkeypatch.setattr("sutr.openapi.sources._github_json", fake)
+    repos = await list_github_repositories("gho", query="WEB")
+    assert [repo["full_name"] for repo in repos] == ["acme/website"]

@@ -18,6 +18,7 @@ from sutr.integrations.bundled.fireflies import FirefliesIntegration
 from sutr.integrations.bundled.github import GitHubIntegration
 from sutr.integrations.bundled.gmail import GmailIntegration
 from sutr.integrations.bundled.google_calendar import GoogleCalendarIntegration
+from sutr.integrations.bundled.google_mcp import GOOGLE_MCP_INTEGRATIONS
 from sutr.integrations.bundled.granola import GranolaIntegration
 from sutr.integrations.bundled.huggingface import HuggingFaceIntegration
 from sutr.integrations.bundled.intercom import IntercomIntegration
@@ -80,6 +81,9 @@ _INTEGRATIONS: dict[str, Integration] = {
         GranolaIntegration(),
         GmailIntegration(),
         GoogleCalendarIntegration(),
+        # Google's own hosted MCP servers (Drive, Docs, Sheets, Chat, ...).
+        # Kept as a list so adding a product touches one file, not this one.
+        *(integration() for integration in GOOGLE_MCP_INTEGRATIONS),
         HuggingFaceIntegration(),
         IntercomIntegration(),
         LaunchDarklyIntegration(),

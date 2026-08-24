@@ -82,8 +82,11 @@ docs/pages/       ← teeny static site; update in the same commit as any API/mo
 Also present, added after the original layout: `server/src/sutr/services/` (the shared service
 layer: `tool_pipeline.py`, `audit.py`, `metering.py`, `redaction.py`, `tool_catalog.py`,
 `deployments.py`), `server/src/sutr/observability/` (`metrics.py`, `tracing.py`),
-`server/src/sutr/deploy/` (`base.py`, `docker_provider.py`, `registry.py`),
-`server/src/sutr/openapi/sources.py` + `packaging.py`, and `sdk/python/` + `sdk/typescript/`.
+`server/src/sutr/deploy/` (`base.py`, `registry.py`, `credentials.py`, `cloud_http.py`,
+`docker_provider.py`, `gcp_provider.py`, `azure_provider.py`, `aws/`),
+`server/src/sutr/connections/` (connected accounts: `providers.py`, `flow.py`, `device.py`,
+`store.py`, `targets.py`), `server/src/sutr/openapi/sources.py` + `packaging.py`, and
+`sdk/python/` + `sdk/typescript/`.
 
 **Verification gate — run after every phase, all must pass:**
 
@@ -132,13 +135,15 @@ build only the named missing piece. Row numbers match the §4 table.
 | 30 | `openapi/packaging.py` — 9-file self-contained package, zero Sutr dependency |
 | 31 | `openapi/packaging.py` `TEST_PY` — offline pytest suite emitted per package |
 | 32 | `openapi/packaging.py` `DOCKERFILE` — per-package image |
-| 34 | `deploy/base.py` `DeploymentProvider` ABC (available/deploy/status/start/stop/remove/logs) + `deploy/registry.py` |
+| 34 | `deploy/base.py` `DeploymentProvider` ABC (available/deploy/status/start/stop/remove/logs, each taking a `ProviderTarget` of credentials + placement) + `deploy/registry.py`; providers declare their own `config_fields` so the builder renders a provider's form without knowing the provider |
+| 33 | Cloud deployment — `deploy/gcp_provider.py` (Cloud Build → Artifact Registry → Cloud Run), `deploy/azure_provider.py` (ACR Tasks → Container Apps), `deploy/aws/provider.py` (S3 → CodeBuild → ECR → App Runner). All authorized by a connected account; credentials resolved fresh per operation in `deploy/credentials.py` |
 | 38 | `services/deployments.py` → `deploy/docker_provider.py`: KMS-backed secrets injected as env vars at deploy time, never baked into the image |
 | 41 | `integrations/registry.py` merges bundled + custom MCP + compiled OpenAPI; `services/tool_catalog.py` unifies discovery/caching |
-| 43 | `cli/src/index.ts` — 7 command groups: auth, deploy, integrations, openapi, tools, output, usage |
+| 43 | `cli/src/index.ts` — 8 command groups: auth, connections, deploy, integrations, openapi, tools, output, usage |
 | 44 | `sutr-cli` v1.1.1 **is published on npm** and matches the local version (manual publish; no CI job) |
-| 46 | 28 routers under `api/`, 29 `include_router` calls in `main.py` |
-| 47 | 23 pages under `ui/src/pages/` |
+| 46 | 29 routers under `api/`, 30 `include_router` calls in `main.py` |
+| 47 | 24 pages under `ui/src/pages/` |
+| — | Connected accounts (`connections/`, `api/connections.py`, migration `0029`): OAuth authorization-code + PKCE for GitHub/GCP/Azure, RFC 8628 device grant for AWS IAM Identity Center. Tokens held as `secret` rows through the configured backend; connections are per-user and cannot be borrowed by another member |
 | 49 | `api/admin.py` (instance settings, waitlist, users, impersonation) + `ui/src/pages/AdminPage.tsx` |
 | 50 | `rate_limit.py`, `upstream_safety.py`, `secrets/kms.py` (AES-256-GCM envelope encryption), `Caddyfile` (TLS + reverse proxy) |
 
@@ -148,7 +153,7 @@ build only the named missing piece. Row numbers match the §4 table.
 |---|---|---|
 | 8 | StreamableHTTP gateway at `/mcp`; outbound client also StreamableHTTP-only | stdio and SSE gateway transports |
 | 12 | Prometheus metrics wired at `/metrics`; OpenTelemetry tracing real but off by default (`settings.otel_enabled`) | structured/JSON log output — `main.py` still uses plain-text `logging.basicConfig` |
-| 15 | paste, direct URL, GitHub (repo/tree/blob/raw + discovery), SwaggerHub — all end to end | nothing outstanding for those four; `upload` remains an alias of `paste` (the UI reads the file client-side and sends text) |
+| 15 | paste, upload, direct URL, GitHub (repo/tree/blob/raw + discovery + OAuth repo picker), SwaggerHub — all five end to end. `upload` is now a distinct source that records the filename as provenance | nothing outstanding |
 | 16 | `openapi_spec_validator` against the official 3.0/3.1 schemas, first error surfaced | a Spectral-style rule layer (rule IDs, severities, best-practice checks) and multi-error reporting |
 | 17 | 3.0.x and 3.1.x normalized | Swagger 2.0 → 3.x conversion (currently rejected outright with an actionable message) |
 | 24 | `apiKey` in header, `http` bearer/basic; untranslatable schemes emit warnings | query/cookie `apiKey`; a real OAuth2 grant flow (oauth2/openIdConnect degrade to a pasted bearer token); more than one active scheme |
@@ -156,7 +161,7 @@ build only the named missing piece. Row numbers match the §4 table.
 | 28 | Sutr's hosted gateway proxies compiled tools dynamically; packaging emits standalone servers | the two are separate code paths with no shared mode toggle |
 | 29 | Generated servers offer `--transport stdio\|http` | plain SSE transport in generated servers |
 | 36 | deploy / start / stop / delete / status | `sync`/`update` (redeploy with a new package) — today it is delete-and-recreate |
-| 37 | status polling via `provider.status()`, `/logs` endpoint, `/health` in generated servers | metrics collection (CPU/memory/request counts); the generated `/health` probe is never scraped by Sutr |
+| 37 | status polling via `provider.status()`, `/logs` endpoint (Cloud Logging for Cloud Run, CloudWatch for App Runner), `/health` in generated servers | metrics collection (CPU/memory/request counts); the generated `/health` probe is never scraped by Sutr; **Azure Container Apps logs** live in Log Analytics, a different API with a different token audience, so `logs()` returns a portal link rather than output |
 | 40 | Compiled tools called through Sutr's gateway route through the full approval pipeline | a generated package running on your own infra executes with no approval hook — **by design**, and it must be stated as a limitation, not silently fixed |
 | 42 | Browse grid with text search over bundled + custom | a marketplace proper: categories, tags, install counts, dedicated route |
 | 45 | Both SDKs exist and are CI-tested (`sdk/python`, `sdk/typescript`) | publishing — `@sutr/sdk` and `sutr-sdk` both 404 on their registries |
@@ -167,13 +172,17 @@ build only the named missing piece. Row numbers match the §4 table.
 
 | # | Note |
 |---|---|
-| 33 | Cloud deployment — only the local Docker provider exists; no GitOps/Argo-style app lifecycle |
 | 35 | Swaraj Cloud adapter — the name appears **only in comments**. Do not invent its API; obtain real docs from the user first |
 | 39 | Deployed-MCP identity/authz — `docker_provider.py` binds the endpoint to 127.0.0.1 and has no auth of its own, which is why the provider is disabled on multi-tenant instances (`deploy/registry.py`) |
 
-**Only one deployment provider exists:** `DockerProvider` (`deploy/docker_provider.py`, id `"docker"`).
-There is **no Kubernetes provider**. `models/deployment.py` and `deploy/registry.py` mention
-Kubernetes/Argo/Swaraj only as future work.
+**Four deployment providers exist:** `docker` (local), `gcp` (Cloud Run), `azure` (Container
+Apps), and `aws` (App Runner). There is still **no Kubernetes provider** and no GitOps/Argo
+app lifecycle; `deploy/registry.py` mentions those only as future work.
+
+**The three cloud providers are implemented against each cloud's documented REST APIs and
+covered by tests at the HTTP layer, but have not been run end to end against live paid
+accounts.** Treat their request bodies as unverified-in-production. The local Docker provider
+has been exercised live.
 
 Known limitations already documented (respect, don't "discover" them): TOTP secrets are stored
 in plaintext; the SSRF guard resolves DNS at validation time and does not pin the address against
@@ -253,24 +262,35 @@ Do **not** copy its structure wholesale — it has no tenancy, no governance, an
 
 ## 4a. The canonical spec → MCP flow (do not restructure this)
 
-The builder is a six-stage wizard in `ui/src/pages/McpBuilderPage.tsx`, backed end to end by real
-endpoints. Each stage maps to one server capability:
+The builder is a seven-stage wizard in `ui/src/pages/McpBuilderPage.tsx` (stage components in
+`ui/src/components/mcp-builder/`), backed end to end by real endpoints. Each stage maps to one
+server capability:
 
 | Stage | UI step | Server |
 |---|---|---|
-| 1 | **Source** — GitHub, SwaggerHub, Direct URL, or Paste (with a local-file picker) | `POST /api/openapi/import` |
+| 1 | **Source** — GitHub (connected account with a repo picker, or a pasted token), SwaggerHub, Upload, Direct URL, or Paste | `POST /api/openapi/import`, `GET /api/connections/github/repos` |
 | 2 | **Choose file** — shown only when a repository holds more than one spec | `POST /api/openapi/discover` |
 | 3 | **Normalize & IR** — validated, `$ref`s resolved, operations/servers/security extracted | `openapi/normalizer.py` + `resolver.py` |
 | 4 | **Select tools** — per-operation checkboxes, tag filter, search | `filters.include_operations` |
 | 5 | **Authentication** — header + `{token}` format, prefilled from the spec's security schemes | `openapi/security.py` |
-| 6 | **Build & deploy** — dry-run preview, then compile; optionally package and deploy | `POST /api/openapi/{id}/compile`, `/package`, `/api/deployments` |
+| 6 | **Build** — dry-run preview, then compile; optionally download the package | `POST /api/openapi/{id}/compile`, `/package` |
+| 7 | **Deploy** — local Docker, Cloud Run, Container Apps, or App Runner; the form is rendered from the provider's declared `config_fields` | `GET /api/deployments/providers`, `GET /api/connections/{id}/targets`, `POST /api/deployments` |
 
 Rules that must hold:
 
 - **Credentials are pinned to their provider's host.** A `github_token` is only ever attached to
   a request whose host already resolved to GitHub; likewise SwaggerHub. There is a regression test
   for exactly this (`tests/test_openapi/test_sources.py::test_github_token_travels_only_to_github`).
-  Source tokens are used for one request and **never persisted**.
+  Source tokens are used for one request and **never persisted**. A *connected account* is
+  different and is persisted, through the secrets backend — see `connections/store.py`.
+- **A connection is a personal grant.** It is scoped to (org, user, provider); one member
+  must never be able to deploy under another's cloud identity, and an API key cannot open
+  one at all (it has no identity to revoke).
+- **`redirect_after` on a connection callback must be a relative path.** An open redirect
+  there turns an OAuth flow into a phishing hop; anything else is discarded, not sanitized.
+- **AWS has no OAuth for its own APIs.** The OAuth path for AWS is IAM Identity Center's
+  `sso-oidc` device grant; only that token is stored, and every operation exchanges it for
+  short-lived role credentials. Do not add a stored access-key path without saying so.
 - **Discovery ranks, it does not decide.** `_rank_candidate` orders `openapi.*` before `swagger.*`,
   shallower before deeper, YAML before JSON, merely spec-shaped names last. The first entry is a
   default selection the user can override with `path`.

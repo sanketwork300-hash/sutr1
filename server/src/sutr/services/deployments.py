@@ -15,6 +15,7 @@ from sqlmodel import Session
 
 from sutr import db
 from sutr.deploy.base import DeploySpec, ProviderError, ProviderStatus
+from sutr.deploy.credentials import resolve_target
 from sutr.deploy.registry import get_provider
 from sutr.models.deployment import Deployment
 from sutr.secrets.records import get_secret_value
@@ -50,12 +51,18 @@ async def run_deployment(deployment_id: uuid.UUID) -> None:
             if deployment.token_secret_id
             else None
         )
+        try:
+            target = await resolve_target(session, deployment)
+        except ProviderError as exc:
+            _set_status(deployment_id, status="failed", error=str(exc))
+            return
         spec = DeploySpec(
             deployment_id=deployment.id,
             name=deployment.name,
             slug=deployment.slug,
             package_zip=deployment.package_zip,
             env={deployment.env_var: token} if (deployment.env_var and token) else {},
+            target=target,
         )
         org_id = deployment.org_id
         name = deployment.name
@@ -100,16 +107,28 @@ def _audit_outcome(
         session.commit()
 
 
-async def refresh_status(session: Session, deployment: Deployment) -> Deployment:
-    """Best-effort reconciliation of the stored status with the provider."""
+async def refresh_status(
+    session: Session, deployment: Deployment, cache: dict | None = None
+) -> Deployment:
+    """Best-effort reconciliation of the stored status with the provider.
+
+    `cache` lets one request reuse a credential across deployments that share
+    an account and placement; it must not outlive that request.
+    """
     if deployment.status in ("queued", "building", "failed"):
         return deployment
     provider = get_provider(deployment.provider)
     if provider is None:
         return deployment
     try:
-        live: ProviderStatus = await provider.status(json.loads(deployment.provider_state_json))
+        target = await resolve_target(session, deployment, cache)
+        live: ProviderStatus = await provider.status(
+            json.loads(deployment.provider_state_json), target
+        )
     except Exception:
+        # Reconciliation is best-effort by design: a cloud that is briefly
+        # unreachable, or an authorization that needs renewing, must not
+        # rewrite the stored status into something wrong.
         return deployment
 
     mapped = {

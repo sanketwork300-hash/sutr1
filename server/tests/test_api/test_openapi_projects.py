@@ -294,3 +294,145 @@ async def test_delete_project_keeps_generated_integration(client, session, test_
     session.expire_all()
     assert session.exec(select(OpenAPIProject)).first() is None
     assert session.exec(select(CustomApiIntegration)).one() is not None
+
+
+# ── upload source and connected-account imports ──────────────────────────────
+
+
+async def test_upload_records_the_filename_as_provenance(client):
+    resp = await client.post(
+        "/api/openapi/import",
+        json={
+            "source_kind": "upload",
+            "content": json.dumps(PETSTORE),
+            "filename": "petstore-v3.yaml",
+        },
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["source_kind"] == "upload"
+    assert body["provenance"] == {"filename": "petstore-v3.yaml"}
+    # An uploaded document has no URL to point back at.
+    assert body["source_url"] is None
+
+
+async def test_upload_without_content_is_rejected(client):
+    resp = await client.post(
+        "/api/openapi/import", json={"source_kind": "upload", "filename": "empty.yaml"}
+    )
+    assert resp.status_code == 400
+
+
+async def test_import_with_use_connection_and_no_connection_says_what_to_do(client):
+    resp = await client.post(
+        "/api/openapi/import",
+        json={
+            "source_kind": "github",
+            "url": "https://github.com/acme/api",
+            "use_connection": True,
+        },
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["error"] == "not_connected"
+
+
+async def test_discover_with_use_connection_and_no_connection_is_the_same_error(client):
+    resp = await client.post(
+        "/api/openapi/discover",
+        json={"url": "https://github.com/acme/api", "use_connection": True},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["error"] == "not_connected"
+
+
+async def test_the_stored_connection_supplies_the_github_token(
+    client, session, test_org, test_user, monkeypatch
+):
+    from sutr.connections.store import save_connection
+
+    save_connection(
+        session,
+        org_id=test_org.id,
+        user_id=test_user.id,
+        provider="github",
+        access_token_value="gho_from_connection",
+        refresh_token_value=None,
+        scopes="repo",
+        account_label="octocat",
+        expires=None,
+        metadata={},
+    )
+    session.commit()
+
+    seen = {}
+
+    async def fake_fetch(url, *, path=None, token=None):
+        seen["token"] = token
+        from sutr.openapi.sources import FetchedSpec
+
+        return FetchedSpec(
+            content=json.dumps(PETSTORE),
+            source_kind="github",
+            source_url="https://github.com/acme/api/blob/main/openapi.json",
+            provenance={"owner": "acme", "repo": "api"},
+        )
+
+    monkeypatch.setattr("sutr.api.openapi_projects.fetch_from_github", fake_fetch)
+    resp = await client.post(
+        "/api/openapi/import",
+        json={
+            "source_kind": "github",
+            "url": "https://github.com/acme/api",
+            "use_connection": True,
+        },
+    )
+    assert resp.status_code == 201
+    assert seen["token"] == "gho_from_connection"
+
+
+async def test_an_explicit_token_beats_the_stored_connection(
+    client, session, test_org, test_user, monkeypatch
+):
+    """A one-off token still works for someone who happens to have connected
+    an account - otherwise the connection becomes impossible to bypass."""
+    from sutr.connections.store import save_connection
+
+    save_connection(
+        session,
+        org_id=test_org.id,
+        user_id=test_user.id,
+        provider="github",
+        access_token_value="gho_from_connection",
+        refresh_token_value=None,
+        scopes="repo",
+        account_label="octocat",
+        expires=None,
+        metadata={},
+    )
+    session.commit()
+
+    seen = {}
+
+    async def fake_fetch(url, *, path=None, token=None):
+        seen["token"] = token
+        from sutr.openapi.sources import FetchedSpec
+
+        return FetchedSpec(
+            content=json.dumps(PETSTORE),
+            source_kind="github",
+            source_url="https://github.com/acme/api",
+            provenance={},
+        )
+
+    monkeypatch.setattr("sutr.api.openapi_projects.fetch_from_github", fake_fetch)
+    resp = await client.post(
+        "/api/openapi/import",
+        json={
+            "source_kind": "github",
+            "url": "https://github.com/acme/api",
+            "use_connection": True,
+            "github_token": "ghp_explicit",
+        },
+    )
+    assert resp.status_code == 201
+    assert seen["token"] == "ghp_explicit"

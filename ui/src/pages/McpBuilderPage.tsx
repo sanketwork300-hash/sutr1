@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
   ArrowLeft,
-  ArrowRight,
   Check,
   ChevronRight,
   Download,
@@ -23,9 +22,34 @@ import {
   type OpenApiCompileResult,
   type OpenApiDiscoverResult,
   type OpenApiProject,
+  type ConnectionProviderInfo,
   type OpenApiSourceKind,
-  type OpenApiWarning,
 } from '@/api/client'
+import {
+  Card,
+  ChoiceButton,
+  Field,
+  Footer,
+  NextLabel,
+  SecretInput,
+  Stat,
+  WarningList,
+} from '@/components/mcp-builder/primitives'
+import {
+  authPreviewStyle,
+  backLinkStyle,
+  bannerStyle,
+  inputStyle,
+  linkButtonStyle,
+  monoInputStyle,
+  radioRowStyle,
+  spin,
+  subLabelStyle,
+} from '@/components/mcp-builder/styles'
+import { DeployStep } from '@/components/mcp-builder/DeployStep'
+import { GithubSource, type GithubAuthMode } from '@/components/mcp-builder/GithubSource'
+import { UploadSource } from '@/components/mcp-builder/UploadSource'
+import { useProviderConnections } from '@/components/connections/useProviderConnections'
 
 /**
  * The MCP builder: one visible pass of the compiler pipeline.
@@ -36,7 +60,7 @@ import {
  * to a stage rather than to "the import".
  */
 
-type StepId = 'source' | 'file' | 'review' | 'select' | 'auth' | 'build'
+type StepId = 'source' | 'file' | 'review' | 'select' | 'auth' | 'build' | 'deploy'
 
 const STEP_LABELS: Record<StepId, string> = {
   source: 'Source',
@@ -44,7 +68,8 @@ const STEP_LABELS: Record<StepId, string> = {
   review: 'Normalize & IR',
   select: 'Select tools',
   auth: 'Authentication',
-  build: 'Build & deploy',
+  build: 'Build',
+  deploy: 'Deploy',
 }
 
 const SOURCES: {
@@ -53,13 +78,14 @@ const SOURCES: {
   icon: React.ReactNode
   hint: string
 }[] = [
-  { kind: 'github', label: 'GitHub', icon: <Code2 size={14} />, hint: 'Repo, file, or raw URL' },
+  { kind: 'github', label: 'GitHub', icon: <Code2 size={14} />, hint: 'Connect, or paste a URL' },
   {
     kind: 'swaggerhub',
     label: 'SwaggerHub',
     icon: <Globe size={14} />,
     hint: 'API page URL',
   },
+  { kind: 'upload', label: 'Upload', icon: <Upload size={14} />, hint: 'A file from this machine' },
   { kind: 'url', label: 'Direct URL', icon: <Globe size={14} />, hint: 'Public spec URL' },
   { kind: 'paste', label: 'Paste', icon: <FileJson size={14} />, hint: 'JSON or YAML' },
 ]
@@ -75,8 +101,15 @@ export default function McpBuilderPage() {
   const [url, setUrl] = useState('')
   const [content, setContent] = useState('')
   const [githubToken, setGithubToken] = useState('')
+  const [githubAuth, setGithubAuth] = useState<GithubAuthMode>('connection')
   const [swaggerhubKey, setSwaggerhubKey] = useState('')
+  const [uploadFilename, setUploadFilename] = useState('')
   const [name, setName] = useState('')
+
+  // Connected accounts are read once here and handed down: the source stage
+  // and the deploy stage both need them, and two independent fetches would
+  // let them disagree about whether GitHub is connected.
+  const connections = useProviderConnections()
 
   // Stage 2 — file choice (GitHub repos with several specs)
   const [discovery, setDiscovery] = useState<OpenApiDiscoverResult | null>(null)
@@ -104,8 +137,12 @@ export default function McpBuilderPage() {
   const steps = useMemo<StepId[]>(() => {
     const base: StepId[] = ['source']
     if (discovery && discovery.candidates.length > 1) base.push('file')
-    return [...base, 'review', 'select', 'auth', 'build']
+    return [...base, 'review', 'select', 'auth', 'build', 'deploy']
   }, [discovery])
+
+  // Whether GitHub requests carry the stored connection or a pasted token.
+  // Resolved in one place so discover and import can never disagree.
+  const useGithubConnection = sourceKind === 'github' && githubAuth === 'connection'
 
   const stepIndex = steps.indexOf(step)
   const operations = useMemo(() => project?.operations ?? [], [project])
@@ -136,7 +173,8 @@ export default function McpBuilderPage() {
     try {
       const result = await api.openapi.discover({
         url: url.trim(),
-        github_token: githubToken.trim() || undefined,
+        use_connection: useGithubConnection,
+        github_token: useGithubConnection ? undefined : githubToken.trim() || undefined,
       })
       setDiscovery(result)
       if (result.candidates.length === 0) {
@@ -164,13 +202,19 @@ export default function McpBuilderPage() {
       setError('')
       setBusy(true)
       try {
+        const inline = sourceKind === 'paste' || sourceKind === 'upload'
         const imported = await api.openapi.import({
           name: name.trim() || undefined,
           source_kind: sourceKind,
-          url: sourceKind === 'paste' ? undefined : url.trim(),
-          content: sourceKind === 'paste' ? content : undefined,
+          url: inline ? undefined : url.trim(),
+          content: inline ? content : undefined,
+          filename: sourceKind === 'upload' ? uploadFilename || undefined : undefined,
           path: path || undefined,
-          github_token: sourceKind === 'github' ? githubToken.trim() || undefined : undefined,
+          use_connection: useGithubConnection,
+          github_token:
+            sourceKind === 'github' && !useGithubConnection
+              ? githubToken.trim() || undefined
+              : undefined,
           swaggerhub_api_key:
             sourceKind === 'swaggerhub' ? swaggerhubKey.trim() || undefined : undefined,
         })
@@ -200,7 +244,17 @@ export default function McpBuilderPage() {
         setBusy(false)
       }
     },
-    [content, githubToken, includeDeprecated, name, sourceKind, swaggerhubKey, url],
+    [
+      content,
+      githubToken,
+      includeDeprecated,
+      name,
+      sourceKind,
+      swaggerhubKey,
+      uploadFilename,
+      url,
+      useGithubConnection,
+    ],
   )
 
   // ── Stage 6: compile ──────────────────────────────────────────────────────
@@ -329,6 +383,12 @@ export default function McpBuilderPage() {
             onContent={setContent}
             githubToken={githubToken}
             onGithubToken={setGithubToken}
+            githubAuth={githubAuth}
+            onGithubAuth={setGithubAuth}
+            githubProvider={connections.find('github')}
+            onConnectionsChanged={connections.reload}
+            uploadFilename={uploadFilename}
+            onUploadFilename={setUploadFilename}
             swaggerhubKey={swaggerhubKey}
             onSwaggerhubKey={setSwaggerhubKey}
             name={name}
@@ -424,6 +484,16 @@ export default function McpBuilderPage() {
             onOpenIntegration={() =>
               navigate(`/integrations/custom-api/${created?.integration_db_id}`)
             }
+            onDeploy={() => setStep('deploy')}
+          />
+        )}
+
+        {step === 'deploy' && project && (
+          <DeployStep
+            project={project}
+            compileBody={compileBody}
+            suggestedName={integrationName || project.name}
+            onBack={() => setStep('build')}
             onOpenDeployments={() => navigate('/deployments')}
           />
         )}
@@ -447,6 +517,12 @@ function SourceStep({
   onContent,
   githubToken,
   onGithubToken,
+  githubAuth,
+  onGithubAuth,
+  githubProvider,
+  onConnectionsChanged,
+  uploadFilename,
+  onUploadFilename,
   swaggerhubKey,
   onSwaggerhubKey,
   name,
@@ -462,6 +538,12 @@ function SourceStep({
   onContent: (value: string) => void
   githubToken: string
   onGithubToken: (value: string) => void
+  githubAuth: GithubAuthMode
+  onGithubAuth: (mode: GithubAuthMode) => void
+  githubProvider: ConnectionProviderInfo | undefined
+  onConnectionsChanged: () => void
+  uploadFilename: string
+  onUploadFilename: (value: string) => void
   swaggerhubKey: string
   onSwaggerhubKey: (value: string) => void
   name: string
@@ -476,7 +558,7 @@ function SourceStep({
     >
       <div style={{ padding: '18px 24px 4px' }}>
         <Field label="Source">
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
             {SOURCES.map((source) => (
               <ChoiceButton
                 key={source.kind}
@@ -491,36 +573,16 @@ function SourceStep({
         </Field>
 
         {sourceKind === 'github' && (
-          <>
-            <Field
-              label="Repository or file URL"
-              help="Any of these work — Sutr figures out the rest:"
-              examples={[
-                'https://github.com/owner/repo  (searches for openapi.yaml, swagger.json, …)',
-                'https://github.com/owner/repo/tree/main/specs  (searches that folder)',
-                'https://github.com/owner/repo/blob/main/openapi.yaml  (uses exactly that file)',
-              ]}
-            >
-              <input
-                value={url}
-                onChange={(event) => onUrl(event.target.value)}
-                placeholder="https://github.com/owner/repo"
-                spellCheck={false}
-                style={monoInputStyle}
-              />
-            </Field>
-            <Field
-              label="GitHub token"
-              optional
-              help="Only needed for a private repository, or if you are hitting GitHub's unauthenticated rate limit. Create one at github.com → Settings → Developer settings → Personal access tokens, with read access to the repository's contents. It is used for this import only and never stored."
-            >
-              <SecretInput
-                value={githubToken}
-                onChange={onGithubToken}
-                placeholder="ghp_… or github_pat_…"
-              />
-            </Field>
-          </>
+          <GithubSource
+            provider={githubProvider}
+            onProviderChanged={onConnectionsChanged}
+            mode={githubAuth}
+            onMode={onGithubAuth}
+            url={url}
+            onUrl={onUrl}
+            token={githubToken}
+            onToken={onGithubToken}
+          />
         )}
 
         {sourceKind === 'swaggerhub' && (
@@ -552,6 +614,15 @@ function SourceStep({
           </>
         )}
 
+        {sourceKind === 'upload' && (
+          <UploadSource
+            content={content}
+            onContent={onContent}
+            filename={uploadFilename}
+            onFilename={onUploadFilename}
+          />
+        )}
+
         {sourceKind === 'url' && (
           <Field
             label="Specification URL"
@@ -571,41 +642,15 @@ function SourceStep({
         {sourceKind === 'paste' && (
           <Field
             label="Specification"
-            help="Paste the whole document — JSON or YAML, OpenAPI 3.0 or 3.1. Swagger 2.0 is rejected; convert it first. You can also load a local file; it is read in your browser and sent as text, so nothing is uploaded to a third party."
+            help="Paste the whole document - JSON or YAML, OpenAPI 3.0 or 3.1. Swagger 2.0 is rejected; convert it first. To use a file from this machine, choose Upload instead."
           >
             <textarea
               value={content}
               onChange={(event) => onContent(event.target.value)}
-              placeholder={'{\n  "openapi": "3.0.3",\n  "info": { "title": "…", "version": "1.0.0" },\n  "paths": { … }\n}'}
+              placeholder={'{\n  "openapi": "3.0.3",\n  "info": { "title": "...", "version": "1.0.0" },\n  "paths": { ... }\n}'}
               spellCheck={false}
               style={{ ...monoInputStyle, height: 190, padding: '10px 11px', resize: 'vertical' }}
             />
-            <label
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                marginTop: 8,
-                fontSize: 12,
-                color: 'var(--text-dim)',
-                cursor: 'pointer',
-              }}
-            >
-              <Upload size={13} />
-              <span style={{ textDecoration: 'underline' }}>Load from a file</span>
-              <input
-                type="file"
-                accept=".json,.yaml,.yml,application/json,text/yaml"
-                style={{ display: 'none' }}
-                onChange={async (event) => {
-                  const file = event.target.files?.[0]
-                  if (!file) return
-                  onContent(await file.text())
-                  // Let the same file be picked again after an edit.
-                  event.target.value = ''
-                }}
-              />
-            </label>
           </Field>
         )}
 
@@ -620,10 +665,28 @@ function SourceStep({
       </div>
 
       <Footer
-        hint={sourceKind === 'github' ? 'Next: Sutr looks for spec files in the repo.' : 'Next: Sutr fetches and normalizes the spec.'}
+        hint={
+          sourceKind === 'github'
+            ? 'Next: sutr looks for specification files in the repository.'
+            : sourceKind === 'upload'
+              ? 'Next: sutr parses, validates, and normalizes the file.'
+              : 'Next: sutr fetches and normalizes the specification.'
+        }
       >
-        <Button size="sm" onClick={onNext} disabled={busy}>
-          {busy ? <Loader2 size={13} style={spin} /> : <NextLabel>{sourceKind === 'github' ? 'Find specs' : 'Import'}</NextLabel>}
+        <Button
+          size="sm"
+          onClick={onNext}
+          disabled={
+            busy ||
+            ((sourceKind === 'upload' || sourceKind === 'paste') && !content.trim()) ||
+            (sourceKind !== 'upload' && sourceKind !== 'paste' && !url.trim())
+          }
+        >
+          {busy ? (
+            <Loader2 size={13} style={spin} />
+          ) : (
+            <NextLabel>{sourceKind === 'github' ? 'Find specs' : 'Import'}</NextLabel>
+          )}
         </Button>
       </Footer>
     </Card>
@@ -1118,7 +1181,7 @@ function BuildStep({
   onDownload,
   onBack,
   onOpenIntegration,
-  onOpenDeployments,
+  onDeploy,
 }: {
   project: OpenApiProject
   selectedServer: { url: string; variables?: Record<string, { default?: string; enum?: string[] }> } | null
@@ -1139,7 +1202,7 @@ function BuildStep({
   onDownload: () => void
   onBack: () => void
   onOpenIntegration: () => void
-  onOpenDeployments: () => void
+  onDeploy: () => void
 }) {
   if (created) {
     return (
@@ -1158,7 +1221,7 @@ function BuildStep({
           <ol style={{ margin: 0, paddingLeft: 20, fontSize: 12.5, color: 'var(--text-dim)', lineHeight: 1.9 }}>
             <li>Connect the API credential, then relax policy per tool.</li>
             <li>Try a call in the Playground.</li>
-            <li>Optionally run it as a standalone MCP server from Deployments.</li>
+            <li>Optionally deploy it as a standalone MCP server - next stage.</li>
           </ol>
         </div>
         <Footer hint={`Base URL: ${created.base_url}`}>
@@ -1166,7 +1229,7 @@ function BuildStep({
             <Button size="sm" variant="outline" onClick={onDownload} disabled={busy}>
               {busy ? <Loader2 size={13} style={spin} /> : <><Download size={13} style={{ marginRight: 5 }} /> Server package</>}
             </Button>
-            <Button size="sm" variant="outline" onClick={onOpenDeployments}>
+            <Button size="sm" variant="outline" onClick={onDeploy}>
               <Rocket size={13} style={{ marginRight: 5 }} /> Deploy
             </Button>
             <Button size="sm" onClick={onOpenIntegration}>
@@ -1355,6 +1418,9 @@ function BuildStep({
               <Button size="sm" variant="outline" onClick={onDownload} disabled={busy}>
                 <Download size={13} style={{ marginRight: 5 }} /> Package
               </Button>
+              <Button size="sm" variant="outline" onClick={onDeploy} disabled={busy}>
+                <Rocket size={13} style={{ marginRight: 5 }} /> Deploy
+              </Button>
               <Button size="sm" onClick={onCreate} disabled={busy}>
                 {busy ? <Loader2 size={13} style={spin} /> : <NextLabel>Create integration</NextLabel>}
               </Button>
@@ -1439,382 +1505,4 @@ function Stepper({
       })}
     </div>
   )
-}
-
-function Card({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string
-  subtitle: string
-  children: React.ReactNode
-}) {
-  return (
-    <section
-      style={{
-        background: 'var(--content-bg)',
-        border: '1px solid var(--border)',
-        borderRadius: 12,
-        boxShadow: 'var(--card-shadow)',
-        overflow: 'hidden',
-      }}
-    >
-      <header style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--border)' }}>
-        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--text)' }}>{title}</h2>
-        <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--text-dim)', lineHeight: 1.55 }}>
-          {subtitle}
-        </p>
-      </header>
-      {children}
-    </section>
-  )
-}
-
-function Footer({
-  hint,
-  onBack,
-  children,
-}: {
-  hint: string
-  onBack?: () => void
-  children?: React.ReactNode
-}) {
-  return (
-    <footer
-      style={{
-        padding: '14px 24px',
-        borderTop: '1px solid var(--border)',
-        background: 'var(--surface)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-      }}
-    >
-      {onBack && (
-        <Button size="sm" variant="ghost" onClick={onBack}>
-          <ArrowLeft size={13} style={{ marginRight: 4 }} /> Back
-        </Button>
-      )}
-      <span style={{ fontSize: 11, color: 'var(--text-faint)', flex: 1 }}>{hint}</span>
-      {children}
-    </footer>
-  )
-}
-
-function NextLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-      {children}
-      <ArrowRight size={13} style={{ marginLeft: 5 }} />
-    </span>
-  )
-}
-
-function Field({
-  label,
-  optional,
-  help,
-  examples,
-  children,
-}: {
-  label: string
-  optional?: boolean
-  help?: string
-  examples?: string[]
-  children: React.ReactNode
-}) {
-  return (
-    <div style={{ paddingBottom: 18 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 5 }}>
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 700,
-            color: 'var(--text)',
-            textTransform: 'uppercase',
-            letterSpacing: 0.5,
-          }}
-        >
-          {label}
-        </span>
-        {optional && (
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 600,
-              color: 'var(--text-faint)',
-              textTransform: 'uppercase',
-              letterSpacing: 0.4,
-            }}
-          >
-            optional
-          </span>
-        )}
-      </div>
-      {help && (
-        <p style={{ margin: '0 0 7px', fontSize: 11.5, color: 'var(--text-dim)', lineHeight: 1.55 }}>
-          {help}
-        </p>
-      )}
-      {children}
-      {examples && examples.length > 0 && (
-        <ul
-          style={{
-            margin: '6px 0 0',
-            paddingLeft: 16,
-            fontSize: 11,
-            color: 'var(--text-faint)',
-            fontFamily: 'var(--font-mono)',
-            lineHeight: 1.7,
-          }}
-        >
-          {examples.map((example) => (
-            <li key={example}>{example}</li>
-          ))}
-        </ul>
-      )}
-    </div>
-  )
-}
-
-function SecretInput({
-  value,
-  onChange,
-  placeholder,
-}: {
-  value: string
-  onChange: (value: string) => void
-  placeholder: string
-}) {
-  return (
-    <div style={{ position: 'relative' }}>
-      <KeyRound
-        size={13}
-        style={{ position: 'absolute', left: 11, top: 11, color: 'var(--text-faint)' }}
-      />
-      <input
-        type="password"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        autoComplete="off"
-        spellCheck={false}
-        style={{ ...monoInputStyle, paddingLeft: 32 }}
-      />
-    </div>
-  )
-}
-
-function ChoiceButton({
-  active,
-  onClick,
-  icon,
-  label,
-  hint,
-}: {
-  active: boolean
-  onClick: () => void
-  icon?: React.ReactNode
-  label: string
-  hint: string
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      style={{
-        textAlign: 'left',
-        padding: '9px 11px',
-        borderRadius: 8,
-        border: `1px solid ${active ? 'var(--text)' : 'var(--border)'}`,
-        background: active ? 'var(--content-bg)' : 'var(--surface)',
-        cursor: 'pointer',
-        fontFamily: 'inherit',
-        boxShadow: active ? '0 0 0 1px var(--text) inset' : 'none',
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 5,
-          fontSize: 12,
-          fontWeight: 600,
-          color: 'var(--text)',
-        }}
-      >
-        {icon}
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 10.5,
-          color: 'var(--text-dim)',
-          marginTop: 2,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {hint}
-      </div>
-    </button>
-  )
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div
-        style={{
-          fontSize: 10,
-          fontWeight: 600,
-          color: 'var(--text-faint)',
-          textTransform: 'uppercase',
-          letterSpacing: 0.4,
-        }}
-      >
-        {label}
-      </div>
-      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', marginTop: 2 }}>
-        {value}
-      </div>
-    </div>
-  )
-}
-
-function WarningList({
-  warnings,
-  inline,
-}: {
-  warnings: OpenApiWarning[]
-  inline?: boolean
-}) {
-  return (
-    <div style={{ padding: inline ? '0 0 8px' : '0 24px 14px' }}>
-      <div
-        style={{
-          fontSize: 10,
-          fontWeight: 600,
-          color: 'var(--text-faint)',
-          textTransform: 'uppercase',
-          letterSpacing: 0.4,
-          marginBottom: 5,
-        }}
-      >
-        {warnings.length} warning{warnings.length === 1 ? '' : 's'} — the import still succeeded
-      </div>
-      {warnings.slice(0, 8).map((warning, index) => (
-        <div key={index} style={{ fontSize: 11.5, color: 'var(--text-dim)', padding: '2px 0' }}>
-          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>
-            {warning.code}
-          </span>{' '}
-          {warning.message}
-          {warning.context ? ` (${warning.context})` : ''}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-const spin: React.CSSProperties = { animation: 'spin 1s linear infinite' }
-
-function bannerStyle(tone: 'error' | 'info' | 'success'): React.CSSProperties {
-  const palette = {
-    error: ['var(--badge-red-bg)', 'var(--badge-red-text)'],
-    info: ['var(--badge-blue-bg)', 'var(--badge-blue-text)'],
-    success: ['var(--badge-green-bg)', 'var(--badge-green-text)'],
-  }[tone]
-  return {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: 8,
-    margin: '0 0 14px',
-    padding: '9px 12px',
-    borderRadius: 8,
-    fontSize: 12.5,
-    lineHeight: 1.5,
-    background: palette[0],
-    color: palette[1],
-  }
-}
-
-const backLinkStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  border: 'none',
-  background: 'transparent',
-  color: 'var(--text-dim)',
-  fontSize: 12,
-  cursor: 'pointer',
-  padding: '0 0 14px',
-  fontFamily: 'inherit',
-}
-
-const linkButtonStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 4,
-  border: 'none',
-  background: 'transparent',
-  color: 'var(--text-dim)',
-  fontSize: 11.5,
-  fontFamily: 'inherit',
-  cursor: 'pointer',
-  padding: 0,
-  textDecoration: 'underline',
-}
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  height: 36,
-  border: '1px solid var(--border)',
-  borderRadius: 7,
-  background: 'var(--input-bg)',
-  color: 'var(--text)',
-  fontSize: 13,
-  fontFamily: 'inherit',
-  outline: 'none',
-  padding: '0 11px',
-  minWidth: 0,
-}
-
-const monoInputStyle: React.CSSProperties = {
-  ...inputStyle,
-  fontFamily: 'var(--font-mono)',
-  fontSize: 12.5,
-}
-
-const subLabelStyle: React.CSSProperties = {
-  fontSize: 10,
-  fontWeight: 600,
-  color: 'var(--text-faint)',
-  textTransform: 'uppercase',
-  letterSpacing: 0.4,
-  marginBottom: 5,
-}
-
-const radioRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  fontSize: 13,
-  color: 'var(--text)',
-  cursor: 'pointer',
-}
-
-const authPreviewStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  padding: '8px 12px',
-  borderRadius: 6,
-  background: 'var(--code-bg)',
-  color: 'var(--code-text)',
-  fontFamily: 'var(--font-mono)',
-  fontSize: 12,
-  overflow: 'hidden',
 }

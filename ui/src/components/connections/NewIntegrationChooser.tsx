@@ -49,7 +49,7 @@ export function NewIntegrationChooser({ open, onClose, onPickMcp, onPickOpenApi 
           <ChoiceCard
             icon={<FileJson size={18} />}
             label="Build from an API"
-            hint="Import an OpenAPI spec from GitHub, SwaggerHub, or a URL and compile it into tools."
+            hint="Import an OpenAPI spec from GitHub, SwaggerHub, a file, or a URL and compile it into tools."
             onClick={onPickOpenApi}
           />
         </div>

@@ -181,8 +181,139 @@ Driven by three flaws the user found in the shipped build, plus a request for a 
 - Tests: 36 new (`test_openapi/test_sources.py` 35, plus the auto-detect regression in `test_api/test_openapi_projects.py`). Suite: **732 green**, ruff clean, UI `tsc`/`vite` and CLI `tsc` clean, and eslint clean on every file touched.
 - Newly documented gaps, not silently skipped: non-JSON request bodies are still dropped at `_pick_json_content` (so a multipart or form operation compiles to a tool that cannot send its payload) - now the top of the remaining-work list; query/cookie `apiKey` and real OAuth2 grants are unsupported; there is no Kubernetes provider and Swaraj Cloud exists only in comments.
 
+## Phase 16 - Connected accounts (OAuth) and cloud deployment targets (2026-08-21)
+Driven by the user's request: remove the custom-API path from "new integration" (already done in
+Phase 15), give the OpenAPI import an OAuth route into GitHub alongside SwaggerHub and a real
+upload, say plainly in the UI what every URL and token field is for, put all of it in the MCP
+builder, and add AWS/Azure/GCP as deployment targets - with OAuth for authorization.
+
+- **Connected accounts** (`connections/`, `api/connections.py`, models `provider_connection` +
+  `oauth_connect_state`, migration `0029`). One mechanism for two uses that are the same grant
+  underneath: GitHub authorizes *reading a specification*, the clouds authorize *running a
+  server*. `providers.py` holds every provider fact, `flow.py` runs authorization-code + PKCE,
+  `device.py` runs the AWS device grant, `store.py` owns persistence and the single
+  `access_token()` entry point that refreshes when due. Tokens are `secret` rows through the
+  configured backend; the connection row holds pointers, an expiry, and a display label.
+- **AWS has no OAuth for its own service APIs**, so the AWS path is the one place AWS really does
+  speak OAuth: IAM Identity Center's `sso-oidc` device authorization grant (RFC 8628). Only the
+  Identity Center token is stored; every operation exchanges it for short-lived role credentials
+  via `GetRoleCredentials`. `authorization_pending` and `slow_down` are treated as normal states
+  of a flow in progress, not failures - otherwise every flow aborts the moment a user takes more
+  than five seconds to read the code.
+- **The callback is the sharp edge and is treated as one.** It arrives as a bare browser redirect
+  with no session, so the `state` row is the only thing binding a code to a user: single-use,
+  15-minute TTL, deleted before the exchange whatever the outcome, and `redirect_after` is
+  refused unless it is a relative path (an open redirect there is how an OAuth flow becomes a
+  phishing hop). Seven API tests cover replay, expiry, denial, provider mismatch, cross-user
+  polling, and both open-redirect shapes.
+- **A connection is a personal grant**, scoped to (org, user, provider). Another member cannot
+  borrow it to deploy under someone else's cloud identity, cannot revoke it, and an API key
+  cannot open one at all - it belongs to the org, not to a person, so there would be no identity
+  to revoke. Disconnecting deletes sutr's tokens and says, in the UI, that it does *not* revoke
+  the app on the provider's side.
+- **Three cloud deployment providers**, each building the image with that cloud's own build
+  service and running it on its serverless container runtime: `gcp_provider.py` (GCS -> Cloud
+  Build -> Artifact Registry -> Cloud Run), `azure_provider.py` (ACR source upload -> ACR Task ->
+  Container Apps), `aws/provider.py` (S3 -> CodeBuild -> ECR -> App Runner). SigV4 is implemented
+  in `deploy/aws/sigv4.py` rather than taking boto3 as a hard dependency for a handful of calls.
+- **The provider interface grew a `ProviderTarget`** (credentials + placement) on every method,
+  because cloud credentials are short-lived by design and caching them on the row would be wrong.
+  `deploy/credentials.py` resolves them fresh per operation. Providers also declare their own
+  `config_fields`, so the builder renders a provider's form without knowing the provider - adding
+  a provider is a server change only.
+- **Decisions worth naming.** Cloud Run has no stopped state (it already scales to zero), so
+  *stop* switches ingress to internal-only, which makes it genuinely unreachable without
+  destroying the revision; Container Apps and App Runner have real stop/pause and use them.
+  Delete removes only what belongs to that deployment - the resource group, registry,
+  environment, bucket, and ECR repository are shared and are left alone. Azure's registry admin
+  user is enabled rather than using a managed identity, because a managed identity needs a role
+  assignment on the subscription that many users' accounts cannot make, and failing on an IAM
+  technicality is worse than a documented registry credential in the app's own secret store.
+  App Runner's `StartCommand` semantics against an existing ENTRYPOINT are ambiguous, so the
+  buildspec re-tags the image with an explicit `CMD` instead - unambiguous, and it makes the
+  published image runnable as-is.
+- **Two IAM roles are asked for, not guessed.** CodeBuild needs a service role and App Runner
+  needs an ECR access role; inventing names for them and failing cryptically would be worse than
+  asking. Both are validated before anything is created, and the exact policies are documented.
+- **MCP builder: seven stages.** `upload` became a real source (drag-and-drop, 8 MB cap, filename
+  kept as provenance) instead of an alias of `paste`. GitHub gained a connected-account option
+  with a repository picker - private repos included - while the pasted-token path stays, because
+  it is the only one that works for an API-key caller, for a repo the user would rather not
+  connect wholesale, and for an install whose operator registered no OAuth app. A new **Deploy**
+  stage renders each provider's form from its declared fields, with target pickers fed by the
+  connected account's own inventory: a project id or account number typed from memory is the
+  single most likely thing to be wrong, and the wrongness only shows up minutes into a build.
+- **Every field says what it is for.** Which scope a token needs, why, whether it is stored, that
+  SwaggerHub wants its key unprefixed, that a direct URL must be reachable from the *server* and
+  that redirects are not followed, that an uploaded file is read in the browser and never stored,
+  and - for each deploy provider - exactly what a deploy will create in the user's account.
+- **Extracted `ui/src/components/mcp-builder/primitives.tsx` and `styles.ts`** from the 1820-line
+  builder page so the new stage components share one Card/Field/SecretInput vocabulary; a wizard
+  assembled from several files still has to read as one wizard.
+- **SigV4 was verified, not assumed.** The implementation matches botocore's `SigV4Auth` /
+  `S3SigV4Auth` byte-for-byte across five cases at a frozen clock, including two of AWS's own
+  published test vectors (`get-vanilla`, `get-vanilla-query-order-key-case`). botocore is not a
+  test dependency; the expected signatures are pinned in `tests/test_deploy/test_sigv4.py`.
+- Tests: **113 new** (connections 39, cloud providers + cloud deployment API 38, SigV4 8, sources
+  and import 8, plus the existing deploy tests updated for the new interface). Suite: **845
+  green**, ruff clean, UI `tsc`/`vite`/eslint clean on every file touched, CLI `tsc`/`tsup` clean,
+  docs site builds.
+- Live-verified against a running server: provider listing with per-provider "not configured"
+  reasons naming the exact env vars and callback URL, a real GitHub authorization URL with PKCE,
+  the 503/409 refusals, deploy-provider config fields, an upload import recording its filename,
+  and a bogus callback state redirecting to `connection_status=error&connection_error=invalid_state`.
+  Migration `0029` applies, rolls back, and re-applies cleanly.
+- **Stated plainly rather than implied by a green test: the three cloud providers have not been
+  run end to end against live paid accounts.** They are implemented against each cloud's
+  documented REST APIs and covered at the HTTP layer; the local Docker provider is the one that
+  has been exercised live. Also newly documented: Azure Container Apps logs live in Log Analytics
+  (a different API with a different token audience than the deploy grant covers), so `logs()`
+  returns a portal link rather than an empty string that would read as "the server printed
+  nothing".
+- Docs: new `pages/mcp-builder.md` (all seven stages, every field, every URL shape),
+  `pages/connected-accounts.md` (what a connection is, both flows, storage, expiry),
+  `pages/self-host/connected-accounts.md` (registering each OAuth app, callback URLs, scopes, the
+  two AWS IAM roles), plus rewritten Connected-accounts and Deployments sections in `api.md`.
+- CLI kept level: new `sutr connections list|connect|targets|disconnect` (the device grant is the
+  one flow a terminal can finish end to end), `--use-connection` on `openapi discover|import`,
+  `--file` now imports as `upload` with its filename, and `deploy create` gained `--connection`
+  and a repeatable `--config key=value`.
+
+## Phase 17 - Google's hosted MCP servers as bundled integrations (2026-08-21)
+Ten first-party Google remote MCP endpoints added, in `integrations/bundled/google_mcp/`.
+
+- **Verified before trusting.** The supplied list of endpoints looked synthesized, so every URL
+  was probed live: a control host (`totallyfakeservice98765.googleapis.com`) returns Google's
+  HTML 404, while the real ones answer a proper MCP `initialize`. Ten of the listed URLs are
+  real MCP servers; the Google Cloud ones (BigQuery, Cloud Storage, Cloud Run, Compute Engine)
+  have **no published fixed endpoint** and were not added. Tool names, counts, and descriptions
+  come from each server's own `tools/list`, not from the table.
+- **Auth is ordinary Google OAuth.** These sit behind Google's standard API frontend: no
+  `WWW-Authenticate`, no `/.well-known/oauth-protected-resource`, and an unauthenticated
+  `tools/call` answers "Expected OAuth 2 access token". So they are `remote_mcp` integrations
+  with `provider="google"` and per-product scopes - installing Sheets must not hand out mailbox
+  access. Only the two Cloud APIs (Maps Code Assist, Developer Knowledge) take `cloud-platform`,
+  and a test enforces that.
+- **Gmail and Calendar are added alongside the existing REST integrations, not over them.**
+  Replacing `gmail`/`google_calendar` would change tool names under anyone who had already
+  installed them, silently invalidating their per-tool approval policies. The two are also
+  genuinely different: Google's Gmail server publishes **no send tool** (drafts only), while
+  Sutr's REST one sends; Google's Calendar server adds `suggest_time` and semantic
+  `search_events`, which the REST one has no equivalent for. Both facts are in the descriptions
+  and pinned by tests, so if Google adds sending the test failing is the prompt to stop telling
+  users something untrue.
+- Live end-to-end: the catalog serves all 12 Google entries, `POST /api/installed` on
+  `google_drive` succeeds, and the OAuth start produces a correct Google authorization URL with
+  the Drive scope and the registered `OAUTH_CALLBACK_URL`.
+- Tests: 66 new (`test_integrations/test_google_mcp.py`); the catalog-size tripwire moved
+  49 -> 59 deliberately. Suite: **953 green**, ruff clean.
+- Docs: `google-oauth-setup.md` now covers all twelve, with per-integration API-enablement and
+  scope tables, and an explicit warning that `OAUTH_GOOGLE_*` (integrations) is not
+  `GOOGLE_LOGIN_*` (sign-in) - though one Google client can serve both if both redirect URIs
+  are registered on it.
+
 ## Final state
-Suites: **server 732**, Python SDK **42**, TypeScript SDK **36**; ruff clean; UI `tsc`+`vite` and CLI `tsc`+`tsup` green; 28 migrations applied cleanly on a populated dev database.
+Suites: **server 953**, Python SDK **42**, TypeScript SDK **36**; ruff clean; UI `tsc`+`vite` and CLI `tsc`+`tsup` green; 29 migrations applied cleanly on a populated dev database.
 Per-row implementation status for all 51 functionalities, with file:line evidence for every claim, lives in `SUTR_BUILD_PROMPT.md` §3 and is re-audited rather than remembered.
-Deferred by design, all documented above and in-code: cloud deployment providers (need real cluster targets), SDK publishing (needs registry credentials), TOTP-secret encryption, SSRF DNS pinning, multi-worker approval event bus and shared rate-limit store, usage-based billing quotas, non-JSON request bodies, query/cookie `apiKey` and OAuth2 grants for compiled APIs.
+Deferred by design, all documented above and in-code: live-account verification of the three cloud providers, a Kubernetes provider, Azure Container Apps log retrieval, SDK publishing (needs registry credentials), TOTP-secret encryption, SSRF DNS pinning, multi-worker approval event bus and shared rate-limit store, usage-based billing quotas, non-JSON request bodies, query/cookie `apiKey` and OAuth2 grants for compiled APIs.
 Governance (unify REST/MCP pipeline, log redaction, audit trail, exact-args-forever, decision-row locking) · OpenAPI compiler (§17–27) · HTTP runtime · generated servers · deployment providers (K8s/Argo/Swaraj) · observability & metering · SDK/CLI · frontend completion · security hardening · E2E validation.

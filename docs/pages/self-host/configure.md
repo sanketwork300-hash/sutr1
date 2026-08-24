@@ -29,7 +29,8 @@ docker compose -f docker-compose.prod.yml up -d
 | `OTEL_ENABLED` | `false` | Enables OpenTelemetry tracing. Requires the optional SDK: rebuild with `uv sync --extra otel`. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | *(empty)* | OTLP/HTTP collector URL, e.g. `http://collector:4318/v1/traces`. Omit to record spans without exporting. |
 | `OTEL_SERVICE_NAME` | `sutr` | Service name reported on spans. |
-| `DEPLOY_DOCKER_ENABLED` | `true` | Allows the local Docker deployment provider. Set `false` to disable deployments entirely. |
+| `DEPLOY_DOCKER_ENABLED` | `true` | Allows the local Docker deployment provider (always off on cloud instances). |
+| `DEPLOY_GCP_ENABLED` / `DEPLOY_AZURE_ENABLED` / `DEPLOY_AWS_ENABLED` | `true` | Allow each cloud deployment target. Each also needs its OAuth app configured — see [Connected accounts](/self-host/connected-accounts). |
 | `TOOL_RATE_LIMIT_PER_MINUTE` | `120` | Tool executions allowed per organization per minute, enforced for REST and MCP alike. Refusals return `429` with `Retry-After` and are not metered. `0` disables the limit. |
 
 ## Backups
@@ -180,6 +181,40 @@ Because `VITE_PUBLIC_POSTHOG_HOST` is compiled into the UI bundle, changing it r
 ```sh
 docker compose -f docker-compose.prod.yml up -d --build
 ```
+
+## Connected accounts (spec sources and cloud deployments)
+
+Separate from the integration OAuth credentials below, and separate again from Google sign-in.
+These let your users authorize Sutr against **their own** GitHub and cloud accounts: GitHub to
+read OpenAPI specifications out of repositories, and Google Cloud / Azure / AWS to run generated
+MCP servers.
+
+```env
+# GitHub — callback {BASE_URL}/api/connections/github/callback
+GITHUB_OAUTH_CLIENT_ID=...
+GITHUB_OAUTH_CLIENT_SECRET=...
+GITHUB_OAUTH_SCOPE="repo read:user"        # optional; narrow for a public-only install
+
+# Google Cloud — callback {BASE_URL}/api/connections/gcp/callback
+GCP_OAUTH_CLIENT_ID=...
+GCP_OAUTH_CLIENT_SECRET=...
+
+# Azure — callback {BASE_URL}/api/connections/azure/callback
+AZURE_OAUTH_CLIENT_ID=...
+AZURE_OAUTH_CLIENT_SECRET=...
+AZURE_OAUTH_TENANT=organizations
+
+# AWS — no client secret: the device grant registers its client dynamically
+AWS_SSO_START_URL=https://d-1234567890.awsapps.com/start
+AWS_SSO_REGION=us-east-1
+```
+
+Each is optional. A provider with no credentials is reported as *not configured* — naming the
+exact variables and the callback URL to register — rather than showing a button that fails.
+`sutr connections list` prints the current state.
+
+Full walk-through, including the two IAM roles an AWS account needs:
+[Connected accounts setup](/self-host/connected-accounts).
 
 ## OAuth credentials for integrations
 

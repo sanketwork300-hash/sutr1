@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
+import { basename } from "node:path";
 import { Command } from "commander";
 import { buildHeaders, request } from "../client.js";
 import { readConfig } from "../config.js";
@@ -84,14 +85,23 @@ openapiCommand
     "--github-token <token>",
     "Token for a private repository (falls back to $SUTR_GITHUB_TOKEN)",
   )
+  .option(
+    "--use-connection",
+    "Use your connected GitHub account instead of a token (sutr connections connect github)",
+  )
   .option("-o, --output <format>", "Output format")
-  .action(async (url: string, opts: { githubToken?: string; output: string }) => {
+  .action(
+    async (
+      url: string,
+      opts: { githubToken?: string; useConnection?: boolean; output: string },
+    ) => {
     const format = resolveFormat(opts.output);
     try {
       const result = await request<DiscoverResult>("/api/openapi/discover", {
         method: "POST",
         body: {
           url,
+          use_connection: opts.useConnection ?? false,
           github_token: opts.githubToken ?? process.env.SUTR_GITHUB_TOKEN,
         },
       });
@@ -119,6 +129,10 @@ openapiCommand
   .command("import")
   .description("Import an OpenAPI 3.x document (local file, URL, GitHub, or SwaggerHub)")
   .option("--file <path>", "Path to a local spec file (JSON or YAML)")
+  .option(
+    "--use-connection",
+    "Use your connected GitHub account instead of a token (sutr connections connect github)",
+  )
   .option("--url <url>", "Spec URL, or a GitHub / SwaggerHub link (detected automatically)")
   .option("--path <path>", "For a GitHub repository: which spec file to import")
   .option(
@@ -138,6 +152,7 @@ openapiCommand
       path?: string;
       githubToken?: string;
       swaggerhubKey?: string;
+      useConnection?: boolean;
       name?: string;
       output: string;
     }) => {
@@ -151,14 +166,18 @@ openapiCommand
       try {
         const body: Record<string, unknown> = { name: opts.name };
         if (opts.file) {
-          body.source_kind = "paste";
+          // "upload" rather than "paste": the project then records which file
+          // it came from, which is the only provenance a local import has.
+          body.source_kind = "upload";
           body.content = readFileSync(opts.file, "utf-8");
+          body.filename = basename(opts.file);
         } else {
           // The server detects GitHub and SwaggerHub links and routes them
           // through the right adapter, so the CLI does not duplicate that rule.
           body.source_kind = "url";
           body.url = opts.url;
           body.path = opts.path;
+          body.use_connection = opts.useConnection ?? false;
           body.github_token = opts.githubToken ?? process.env.SUTR_GITHUB_TOKEN;
           body.swaggerhub_api_key =
             opts.swaggerhubKey ?? process.env.SUTR_SWAGGERHUB_API_KEY;

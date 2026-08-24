@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { api, type OrgSettingsResponse, type TotpStatusResponse } from '@/api/client'
+import { ConnectedAccountsPanel } from '@/components/connections/ConnectedAccountsPanel'
 import { MembersSection } from '@/components/settings/MembersSection'
 import { WorkspacesPanel } from '@/components/settings/WorkspacesPanel'
 import { TotpCodeDialog } from '@/components/totp/TotpCodeDialog'
@@ -82,6 +83,9 @@ export default function SettingsPage() {
 
           <SectionLabel>Workspaces</SectionLabel>
           <WorkspacesPanel />
+
+          <SectionLabel>Connected accounts</SectionLabel>
+          <ConnectedAccountsPanel />
 
           <SectionLabel>Approvals</SectionLabel>
           <ApprovalExpiryPanel />

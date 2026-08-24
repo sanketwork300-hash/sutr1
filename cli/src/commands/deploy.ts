@@ -3,7 +3,7 @@ import { request } from "../client.js";
 import { print, printError, resolveFormat } from "../output.js";
 
 export const deployCommand = new Command("deploy").description(
-  "Deploy generated MCP servers (local Docker; more providers later)",
+  "Deploy generated MCP servers to local Docker, Cloud Run, Container Apps, or App Runner",
 );
 
 interface DeploymentRow {
@@ -30,6 +30,24 @@ function row(d: DeploymentRow) {
     tools: d.tool_count,
     error: d.error ?? "-",
   };
+}
+
+/**
+ * Accumulate repeated `--config key=value` flags.
+ *
+ * Keys are whatever the chosen provider declares in `config_fields`, so the
+ * CLI never has to learn what Cloud Run or App Runner needs; `sutr deploy
+ * providers` prints the list.
+ */
+function collectConfig(
+  pair: string,
+  previous: Record<string, string>,
+): Record<string, string> {
+  const index = pair.indexOf("=");
+  if (index < 1) {
+    printError(`--config expects key=value, got "${pair}".`, 1);
+  }
+  return { ...previous, [pair.slice(0, index)]: pair.slice(index + 1) };
 }
 
 function splitList(value: string | undefined): string[] {
@@ -71,7 +89,17 @@ deployCommand
   .description("Deploy an OpenAPI project as a running MCP server")
   .requiredOption("--project <id>", "OpenAPI project id (sutr openapi list)")
   .requiredOption("--name <name>", "Deployment name")
-  .option("--provider <id>", "Deployment provider", "docker")
+  .option("--provider <id>", "Deployment provider: docker, gcp, azure, aws", "docker")
+  .option(
+    "--connection <id>",
+    "Connected cloud account authorizing the deploy (sutr connections list)",
+  )
+  .option(
+    "--config <key=value...>",
+    "Provider placement, repeatable: --config project=acme --config region=us-central1",
+    collectConfig,
+    {},
+  )
   .option("--token <token>", "Upstream API token, injected as an env var at runtime")
   .option("--include-tags <tags>", "Only include operations with these tags (comma-separated)")
   .option("--exclude-tags <tags>", "Exclude operations with these tags (comma-separated)")
@@ -82,6 +110,8 @@ deployCommand
       project: string;
       name: string;
       provider: string;
+      connection?: string;
+      config: Record<string, string>;
       token?: string;
       includeTags?: string;
       excludeTags?: string;
@@ -96,6 +126,8 @@ deployCommand
             project_id: opts.project,
             name: opts.name,
             provider: opts.provider,
+            connection_id: opts.connection ?? null,
+            provider_config: opts.config,
             token: opts.token,
             compile: {
               filters: {

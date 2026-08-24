@@ -9,6 +9,7 @@ const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPasswordPage'))
 const ResetPasswordPage = lazy(() => import('@/pages/ResetPasswordPage'))
 const VerifyEmailPage = lazy(() => import('@/pages/VerifyEmailPage'))
 const GoogleCallbackPage = lazy(() => import('@/pages/GoogleCallbackPage'))
+const ConnectionCallbackPage = lazy(() => import('@/pages/ConnectionCallbackPage'))
 const ConnectionsPage = lazy(() => import('@/pages/ConnectionsPage'))
 const ConnectionDetailPage = lazy(() => import('@/pages/ConnectionDetailPage'))
 const CustomApiBuilderPage = lazy(() => import('@/pages/CustomApiBuilderPage'))
@@ -60,6 +61,7 @@ export default function App() {
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/login/google/callback" element={<GoogleCallbackPage />} />
+          <Route path="/connections/callback" element={<ConnectionCallbackPage />} />
           <Route path="/approve/:id" element={<ApprovePage />} />
           <Route path="/oauth/authorize" element={<OAuthConsentPage />} />
           <Route path="/oauth/success" element={<OAuthSuccessPage />} />

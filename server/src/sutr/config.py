@@ -42,9 +42,47 @@ class Settings(BaseSettings):
     google_login_client_id: str = ""
     google_login_client_secret: str = ""
 
+    # ── Connected accounts (OAuth) ────────────────────────────────────────
+    # One OAuth app per provider, registered once by whoever runs this
+    # server. A provider with no client id is reported as unconfigured and
+    # its "Connect" button is disabled — never silently broken.
+    #
+    # GitHub: an OAuth app (Settings → Developer settings → OAuth Apps) whose
+    # callback is {base_url}/api/connections/github/callback. Used to read
+    # OpenAPI specs out of repositories the user can already see.
+    github_oauth_client_id: str = ""
+    github_oauth_client_secret: str = ""
+    # Scope requested for GitHub. "repo" is needed to read private
+    # repositories; "public_repo" or "" suffices for public-only installs.
+    github_oauth_scope: str = "repo read:user"
+
+    # Google Cloud deployments. Separate from google_login_* on purpose: this
+    # app requests cloud-platform, which is a far larger grant than sign-in.
+    gcp_oauth_client_id: str = ""
+    gcp_oauth_client_secret: str = ""
+
+    # Azure deployments (Microsoft identity platform). "organizations" lets any
+    # work/school tenant consent; pin a tenant id for a single-tenant install.
+    azure_oauth_client_id: str = ""
+    azure_oauth_client_secret: str = ""
+    azure_oauth_tenant: str = "organizations"
+
+    # AWS deployments via IAM Identity Center. AWS has no OAuth for its own
+    # APIs, so this is the OIDC device authorization grant against sso-oidc:
+    # the client is registered dynamically, which is why there is no secret
+    # here. The start URL looks like https://d-abc123.awsapps.com/start.
+    aws_sso_start_url: str = ""
+    aws_sso_region: str = "us-east-1"
+
     # Deployment engine: allow the local Docker provider (self-hosted only —
     # the registry additionally refuses it whenever is_cloud is set).
     deploy_docker_enabled: bool = True
+    # Cloud providers. Each additionally requires its OAuth app to be
+    # configured above; enabling without credentials surfaces as "not
+    # configured" rather than a failed deploy.
+    deploy_gcp_enabled: bool = True
+    deploy_azure_enabled: bool = True
+    deploy_aws_enabled: bool = True
 
     # Tool executions allowed per org per minute, enforced in the shared
     # pipeline so REST and MCP are limited alike. 0 disables the limit.

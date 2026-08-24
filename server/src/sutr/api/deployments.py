@@ -14,9 +14,11 @@ from sqlmodel import Session, col, select
 
 from sutr.api.openapi_projects import CompileRequest, _resolve_compilation
 from sutr.authz import ensure_agent_can
+from sutr.connections.store import load_connection
 from sutr.db import get_session
 from sutr.dependencies import AgentAuth, get_agent_auth
-from sutr.deploy.base import ProviderError
+from sutr.deploy.base import ProviderError, ProviderTarget
+from sutr.deploy.credentials import deployment_config, resolve_target
 from sutr.deploy.registry import get_provider, list_providers, provider_enabled
 from sutr.models.deployment import Deployment
 from sutr.models.openapi_project import OpenAPIProject
@@ -32,6 +34,13 @@ class CreateDeploymentRequest(BaseModel):
     project_id: uuid.UUID
     name: str = Field(min_length=1, max_length=80)
     provider: str = "docker"
+    # Which connected account authorizes a cloud provider. Required for every
+    # provider that declares one; ignored by the local Docker provider.
+    connection_id: uuid.UUID | None = None
+    # Provider placement: project/subscription/account, region, registry, and
+    # the IAM role ARNs AWS needs. Keys come from the provider's own
+    # `config_fields`, so adding a provider needs no change here.
+    provider_config: dict[str, str] = {}
     # Runtime API token for the upstream, stored via the secrets backend and
     # injected as an env var at run time. None → deploy without credentials.
     token: str | None = None
@@ -51,6 +60,9 @@ def _serialize(deployment: Deployment) -> dict:
         "error": deployment.error,
         "tool_count": deployment.tool_count,
         "project_id": str(deployment.project_id) if deployment.project_id else None,
+        "connection_id": str(deployment.connection_id) if deployment.connection_id else None,
+        "config": deployment_config(deployment),
+        "console_url": state.get("console_url"),
         "env_var": deployment.env_var,
         "has_token": deployment.token_secret_id is not None,
         "created_at": deployment.created_at.isoformat(),
@@ -82,7 +94,9 @@ async def list_deployments(
         .where(Deployment.org_id == agent_auth.org.id)
         .order_by(col(Deployment.created_at).desc())
     ).all()
-    return [_serialize(await refresh_status(session, d)) for d in rows]
+    # One credential per account+placement for the whole page, not per row.
+    cache: dict = {}
+    return [_serialize(await refresh_status(session, d, cache)) for d in rows]
 
 
 @router.post("", status_code=201)
@@ -100,7 +114,61 @@ async def create_deployment(
         raise HTTPException(status_code=400, detail=reason)
     provider = get_provider(body.provider)
     assert provider is not None
-    ok, unavailable_reason = await provider.available()
+
+    connection = None
+    if provider.connection_provider:
+        if body.connection_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Deploying to {provider.display_name} needs a connected "
+                f"{provider.connection_provider} account.",
+            )
+        connection = load_connection(session, body.connection_id, org_id=agent_auth.org.id)
+        if connection is None or connection.provider != provider.connection_provider:
+            raise HTTPException(status_code=404, detail="Connected account not found")
+        if agent_auth.user is None or connection.user_id != agent_auth.user.id:
+            # A connection is a personal grant; borrowing someone else's would
+            # let one member deploy under another member's cloud identity.
+            raise HTTPException(status_code=404, detail="Connected account not found")
+
+    missing = [
+        field.label
+        for field in provider.config_fields
+        if field.required and not (body.provider_config.get(field.key) or field.default)
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{provider.display_name} needs: {', '.join(missing)}.",
+        )
+
+    # Declared defaults are filled in here so the stored config is the whole
+    # truth, rather than a partial one that would behave differently if a
+    # default changed later.
+    resolved_config = {
+        field.key: (body.provider_config.get(field.key) or field.default).strip()
+        for field in provider.config_fields
+    }
+
+    probe_target = ProviderTarget(config=resolved_config)
+    if connection is not None:
+        # Credentials are resolved through the same path a real operation
+        # uses, so "ready" means ready rather than merely "configured".
+        probe = Deployment(
+            org_id=agent_auth.org.id,
+            name=body.name,
+            slug="probe",
+            provider=body.provider,
+            connection_id=connection.id,
+            config_json=json.dumps(resolved_config),
+            package_zip=b"",
+        )
+        try:
+            probe_target = await resolve_target(session, probe)
+        except ProviderError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    ok, unavailable_reason = await provider.available(probe_target)
     if not ok:
         raise HTTPException(
             status_code=503,
@@ -130,6 +198,8 @@ async def create_deployment(
         name=body.name,
         slug=slug,
         provider=body.provider,
+        connection_id=connection.id if connection else None,
+        config_json=json.dumps(resolved_config),
         status="queued",
         package_zip=package_zip,
         tool_count=len(result.tools),
@@ -163,6 +233,9 @@ async def create_deployment(
             "provider": body.provider,
             "project_id": str(project.id),
             "tool_count": len(result.tools),
+            # Placement is recorded, credentials are not: an audit reader needs
+            # to know which account something landed in.
+            "config": resolved_config,
         },
         ip=ip,
         user_agent=user_agent,
@@ -197,7 +270,8 @@ async def deployment_logs(
     if provider is None:
         raise HTTPException(status_code=400, detail="Provider is not available")
     try:
-        logs = await provider.logs(json.loads(deployment.provider_state_json), tail=tail)
+        target = await resolve_target(session, deployment)
+        logs = await provider.logs(json.loads(deployment.provider_state_json), target, tail=tail)
     except ProviderError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     return {"logs": logs}
@@ -217,11 +291,12 @@ async def _lifecycle(
         raise HTTPException(status_code=400, detail="Provider is not available")
     state = json.loads(deployment.provider_state_json)
     try:
+        target = await resolve_target(session, deployment)
         if action == "stop":
-            await provider.stop(state)
+            await provider.stop(state, target)
             deployment.status = "stopped"
         else:
-            await provider.start(state)
+            await provider.start(state, target)
             deployment.status = "running"
     except ProviderError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
@@ -279,7 +354,8 @@ async def delete_deployment(
     provider = get_provider(deployment.provider)
     if provider is not None:
         try:
-            await provider.remove(json.loads(deployment.provider_state_json))
+            target = await resolve_target(session, deployment)
+            await provider.remove(json.loads(deployment.provider_state_json), target)
         except ProviderError as exc:
             # Removal is best-effort: never leave the row stuck because the
             # daemon is down; the container is labeled for manual cleanup.

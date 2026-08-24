@@ -23,7 +23,7 @@ class FakeProvider(DeploymentProvider):
         self.calls = []
         self.status_result = ProviderStatus(state="running")
 
-    async def available(self):
+    async def available(self, target=None):
         return True, None
 
     async def deploy(self, spec):
@@ -37,20 +37,20 @@ class FakeProvider(DeploymentProvider):
             "health_url": "http://127.0.0.1:59999/health",
         }
 
-    async def status(self, state):
+    async def status(self, state, target=None):
         self.calls.append(("status", state))
         return self.status_result
 
-    async def start(self, state):
+    async def start(self, state, target=None):
         self.calls.append(("start", state))
 
-    async def stop(self, state):
+    async def stop(self, state, target=None):
         self.calls.append(("stop", state))
 
-    async def remove(self, state):
+    async def remove(self, state, target=None):
         self.calls.append(("remove", state))
 
-    async def logs(self, state, tail=100):
+    async def logs(self, state, target=None, tail=100):
         self.calls.append(("logs", state, tail))
         return "fake log line\n"
 

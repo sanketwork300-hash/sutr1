@@ -81,7 +81,7 @@ async def test_sweep_survives_provider_errors(session, test_org, monkeypatch):
     """A broken provider must not abort the sweep for other deployments."""
 
     class Exploding(FakeProvider):
-        async def status(self, state):
+        async def status(self, state, target=None):
             raise RuntimeError("daemon unreachable")
 
     monkeypatch.setattr("sutr.services.deployments.get_provider", lambda pid: Exploding())

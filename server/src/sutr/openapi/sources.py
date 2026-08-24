@@ -238,6 +238,50 @@ async def discover_github_specs(
     return candidates[:MAX_CANDIDATES], branch
 
 
+async def list_github_repositories(
+    token: str, *, query: str = "", limit: int = 60
+) -> list[dict[str, Any]]:
+    """Repositories the token's owner can read, newest activity first.
+
+    Only reachable with a connected account: an anonymous caller has no "my
+    repositories" to list. `query` filters client-side on the page we fetched
+    rather than calling the search API, because search is separately
+    rate-limited and ranks by relevance, which reorders a list the user is
+    scanning by recency.
+    """
+    if not token:
+        raise OpenAPIError(
+            "github_auth",
+            "Listing repositories needs a connected GitHub account or a token.",
+        )
+    repos = await _github_json(
+        "/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member",
+        token,
+    )
+    if not isinstance(repos, list):
+        raise OpenAPIError("fetch_failed", "GitHub returned an unexpected repository list.")
+
+    needle = query.strip().lower()
+    entries: list[dict[str, Any]] = []
+    for repo in repos:
+        full_name = repo.get("full_name") or ""
+        if needle and needle not in full_name.lower():
+            continue
+        entries.append(
+            {
+                "full_name": full_name,
+                "html_url": repo.get("html_url") or f"https://github.com/{full_name}",
+                "private": bool(repo.get("private")),
+                "default_branch": repo.get("default_branch") or "main",
+                "description": repo.get("description") or "",
+                "updated_at": repo.get("updated_at"),
+            }
+        )
+        if len(entries) >= limit:
+            break
+    return entries
+
+
 async def fetch_github_file(
     target: GitHubTarget, path: str, branch: str, token: str | None = None
 ) -> str:

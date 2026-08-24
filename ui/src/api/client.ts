@@ -267,8 +267,12 @@ export interface OpenApiImportRequest {
   source_kind: OpenApiSourceKind
   content?: string
   url?: string
+  /** Upload: the original filename, kept as provenance on the project. */
+  filename?: string
   /** GitHub: choose one file when the repo has several. Omit to auto-discover. */
   path?: string
+  /** Authorize GitHub with the caller's stored connection instead of a token. */
+  use_connection?: boolean
   /** Private-source credentials. Used for this request only; never stored. */
   github_token?: string
   swaggerhub_api_key?: string
@@ -337,9 +341,14 @@ export interface Deployment {
   status: string
   url: string | null
   health_url?: string | null
+  /** Deep link into the cloud provider's own console, when there is one. */
+  console_url?: string | null
   error: string | null
   tool_count: number
   project_id: string | null
+  connection_id?: string | null
+  /** The placement the deployment was created with (project, region, ...). */
+  config?: Record<string, string>
   env_var: string | null
   has_token: boolean
   created_at: string
@@ -376,19 +385,107 @@ export interface UsageSummary {
   duration_ms: { avg: number | null; max: number | null }
 }
 
+/** One value a provider needs before it can deploy. Declared server-side so
+ *  the builder renders a provider's form without knowing the provider. */
+export interface DeployConfigField {
+  key: string
+  label: string
+  /** text | target (project/subscription/account) | role | region */
+  kind: string
+  required: boolean
+  placeholder: string
+  default: string
+  help: string
+}
+
 export interface DeploymentProviderInfo {
   id: string
   display_name: string
   enabled: boolean
   reason: string | null
+  /** Which connected account authorizes it, or null for the local provider. */
+  connection_provider?: string | null
+  creates?: string
+  config_fields?: DeployConfigField[]
 }
 
 export interface CreateDeploymentRequest {
   project_id: string
   name: string
   provider: string
+  connection_id?: string | null
+  provider_config?: Record<string, string>
   token?: string | null
   compile?: OpenApiCompileRequest
+}
+
+// ── Connected accounts ──────────────────────────────────────────────────────
+
+export interface ProviderConnection {
+  id: string
+  provider: string
+  display_name: string
+  /** source (spec imports) | deploy (deployment targets) */
+  kind: string
+  account_label: string
+  scopes: string
+  expires_at: string | null
+  expired: boolean
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface ConnectionProviderInfo {
+  id: string
+  display_name: string
+  kind: string
+  /** authorization_code (browser redirect) | device (AWS user code) */
+  flow: string
+  scopes: string
+  configured: boolean
+  reason: string | null
+  setup_url: string
+  grant_summary: string
+  callback_url: string | null
+  connection: ProviderConnection | null
+}
+
+export interface AuthorizeResult {
+  flow: string
+  grant_summary: string
+  /** authorization_code only. */
+  authorization_url?: string
+  /** device only. */
+  state?: string
+  user_code?: string
+  verification_uri?: string
+  verification_uri_complete?: string
+  interval?: number
+  expires_in?: number
+}
+
+export interface DevicePollResult {
+  status: 'pending' | 'connected'
+  connection?: ProviderConnection
+  redirect_after?: string | null
+}
+
+export interface GithubRepo {
+  full_name: string
+  html_url: string
+  private: boolean
+  default_branch: string
+  description: string
+  updated_at: string | null
+}
+
+export interface DeployTarget {
+  id: string
+  label: string
+  detail: string
+  /** AWS only: the Identity Center roles assigned in that account. */
+  roles?: string[]
 }
 
 export interface CreateCustomMcpRequest {
@@ -815,7 +912,7 @@ export const api = {
         body: JSON.stringify(data),
       })
     },
-    discover(data: { url: string; github_token?: string }) {
+    discover(data: { url: string; use_connection?: boolean; github_token?: string }) {
       return request<OpenApiDiscoverResult>('/openapi/discover', {
         method: 'POST',
         body: JSON.stringify(data),
@@ -849,6 +946,39 @@ export const api = {
       return request<UsageSummary>(`/usage/summary${suffix}`)
     },
   },
+  connections: {
+    list() {
+      return request<{ providers: ConnectionProviderInfo[] }>('/connections')
+    },
+    authorize(provider: string, redirectAfter?: string) {
+      return request<AuthorizeResult>(`/connections/${encodeURIComponent(provider)}/authorize`, {
+        method: 'POST',
+        body: JSON.stringify({ redirect_after: redirectAfter ?? null }),
+      })
+    },
+    pollAws(state: string) {
+      return request<DevicePollResult>('/connections/aws/poll', {
+        method: 'POST',
+        body: JSON.stringify({ state }),
+      })
+    },
+    githubRepos(q = '') {
+      return request<{ account: string; repositories: GithubRepo[] }>(
+        `/connections/github/repos?q=${encodeURIComponent(q)}`,
+      )
+    },
+    targets(connectionId: string) {
+      return request<{ provider: string; targets: DeployTarget[] }>(
+        `/connections/${encodeURIComponent(connectionId)}/targets`,
+      )
+    },
+    disconnect(connectionId: string) {
+      return request<void>(`/connections/${encodeURIComponent(connectionId)}`, {
+        method: 'DELETE',
+      })
+    },
+  },
+
   deployments: {
     providers() {
       return request<DeploymentProviderInfo[]>('/deployments/providers')
