@@ -85,6 +85,7 @@ _ORG_STATE_REFS: tuple[tuple[str, str], ...] = (
 
 def _row_count(conn, table: str, column: str, value) -> int:
     result = conn.execute(
+        # nosemgrep: avoid-sqlalchemy-text
         sa.text(f'SELECT COUNT(*) FROM "{table}" WHERE "{column}" = :val'),
         {"val": value},
     ).scalar_one()

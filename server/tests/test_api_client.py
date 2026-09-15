@@ -102,11 +102,13 @@ def test_build_url_trailing_slash():
 # ── Query params ──────────────────────────────────────────────────────────
 
 
-def _make_tool(path: str = "/v1/items", params: list[Param] | None = None) -> ApiTool:
+def _make_tool(
+    path: str = "/v1/items", params: list[Param] | None = None, method: str = "GET"
+) -> ApiTool:
     return ApiTool(
         name="t",
         description="test",
-        method="GET",
+        method=method,
         path=path,
         params=params or [],
     )
@@ -151,6 +153,7 @@ def test_build_query_skips_missing():
 def test_build_body_excludes_path_and_query():
     tool = _make_tool(
         path="/v1/items/{id}",
+        method="POST",
         params=[
             Param(name="id"),
             Param(name="q", query=True),
@@ -169,9 +172,15 @@ def test_build_body_returns_none_when_empty():
 
 
 def test_build_body_skips_none_values():
-    tool = _make_tool(params=[Param(name="name"), Param(name="optional")])
+    tool = _make_tool(method="POST", params=[Param(name="name"), Param(name="optional")])
     body = _build_body(tool, {"name": "Test", "optional": None})
     assert body == {"name": "Test"}
+
+
+def test_get_requests_never_carry_a_body():
+    """A GET with body-shaped params sends none — the arguments are for the URL."""
+    tool = _make_tool(method="GET", params=[Param(name="name")])
+    assert _build_body(tool, {"name": "Test"}) is None
 
 
 # ── params_to_input_schema ────────────────────────────────────────────────

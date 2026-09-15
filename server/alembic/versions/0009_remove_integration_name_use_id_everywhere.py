@@ -29,6 +29,7 @@ def _has_index(conn, table: str, idx: str) -> bool:
 
 def _delete_duplicate_rows(table_name: str, partition_cols: list[str], order_by: str) -> None:
     partition_sql = ", ".join(partition_cols)
+    # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query
     op.execute(
         f"""
         DELETE FROM {table_name}

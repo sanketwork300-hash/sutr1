@@ -1,0 +1,217 @@
+# Running more than one of everything (LLD §5.4, §5.7, §5.8).
+#
+# What this stack actually is:
+#
+#   caddy ──┬── api-1 ──┐
+#           └── api-2 ──┴── pgbouncer ── postgres-primary ──▶ postgres-replica
+#                   relay ──┘                (streaming replication, one slot)
+#
+# Two API replicas behind a load balancer that health-checks them on
+# /health/ready, a connection pooler in transaction mode, a PostgreSQL primary
+# with a streaming replica, and the event relay as its own process.
+#
+# What it is NOT, and what nothing here should be read as claiming:
+#
+# - **There is no automatic failover.** The replica is a warm copy, not a
+#   standby that promotes itself. Promotion is `pg_ctl promote` plus repointing
+#   pgbouncer, both deliberate acts. The LLD's connection path names a proxy
+#   between the pooler and the database for exactly this job; there is none
+#   here, and adding an unconfigured HAProxy would only look like one.
+# - **The availability targets are not met or measured.** §5.4 asks for
+#   99.99% on PostgreSQL. One primary on one host is not that, and no number
+#   here has been measured.
+# - **This is one host.** Every "replica" shares a kernel, a disk and a power
+#   supply. It demonstrates that the *software* runs correctly with more than
+#   one of it, which is the part that is this repository's to get right.
+#
+# Start it with:
+#   docker compose -f deploy/ha/docker-compose.ha.yml up -d --build
+name: sutr-ha
+
+x-api-environment: &api-environment
+  # Through the pooler, never straight at the primary: the point of the pooler
+  # is that replica count and connection count stop being the same number.
+  DATABASE_URL: "postgresql+psycopg2://sutr:${POSTGRES_PASSWORD:-sutr}@pgbouncer:6432/sutr"
+  JWT_SECRET_KEY: "${JWT_SECRET_KEY:?set JWT_SECRET_KEY — every replica must use the same one}"
+  BASE_URL: "${BASE_URL:-http://localhost:8080}"
+  UI_BASE_URL: "${BASE_URL:-http://localhost:8080}"
+  IS_SELF_HOSTED: "true"
+  TRUST_PROXY_HEADERS: "true"
+  LOG_FORMAT: "json"
+  REGION: "${REGION:-local}"
+  # Small on purpose: this is multiplied by the number of replicas before
+  # PostgreSQL sees it. See server/src/sutr/db.py.
+  DB_POOL_SIZE: "5"
+  DB_MAX_OVERFLOW: "5"
+  # DB_STATEMENT_TIMEOUT_MS is deliberately NOT set here. It travels as an
+  # `options=-c statement_timeout=...` startup parameter, and PgBouncer refuses
+  # unknown startup parameters outright: every replica dies at boot with
+  # "unsupported startup parameter in options: statement_timeout". Telling
+  # PgBouncer to ignore it would be worse — the setting would look configured
+  # and do nothing. Behind a pooler the timeout goes on the role instead, which
+  # is what postgres/init-replication.sh does.
+
+services:
+  postgres-primary:
+    image: postgres:17.6-alpine
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
+      - -c
+      - hot_standby=on
+      # Replicas connect as the replication user; without this line the
+      # replica's basebackup is refused and the stack comes up looking healthy
+      # with no replication at all.
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+    environment:
+      POSTGRES_USER: sutr
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-sutr}"
+      POSTGRES_DB: sutr
+    volumes:
+      - primary-data:/var/lib/postgresql/data
+      - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./postgres/init-replication.sh:/docker-entrypoint-initdb.d/init-replication.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sutr -d sutr"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  postgres-replica:
+    image: postgres:17.6-alpine
+    user: postgres
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: "${POSTGRES_PASSWORD:-sutr}"
+    # A base backup on first start, then follow. `-R` writes the connection
+    # settings and standby.signal, which is what makes it a replica rather than
+    # a second independent database.
+    command: >
+      bash -c '
+        if [ ! -f /var/lib/postgresql/data/PG_VERSION ]; then
+          until pg_basebackup --pgdata=/var/lib/postgresql/data -R \
+              --slot=replica_1 --create-slot \
+              --host=postgres-primary --port=5432 --username=replicator --wal-method=stream; do
+            echo "waiting for the primary to accept a base backup"; sleep 2;
+          done;
+          chmod 0700 /var/lib/postgresql/data;
+        fi;
+        exec postgres'
+    volumes:
+      - replica-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sutr -d sutr"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.24.1-p1
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres-primary
+      DB_PORT: "5432"
+      DB_USER: sutr
+      DB_PASSWORD: "${POSTGRES_PASSWORD:-sutr}"
+      DB_NAME: sutr
+      # 6432 by convention, and explicitly: this image listens on 5432 unless
+      # told otherwise, which makes it indistinguishable from the database it
+      # is pooling for.
+      LISTEN_PORT: "6432"
+      # Transaction pooling, which is the mode that actually saves connections.
+      # It is safe here because nothing in this platform holds session state on
+      # a connection: leadership is a lease row, not a session-level advisory
+      # lock, precisely so that this line can say "transaction" (ADR-074).
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "500"
+      DEFAULT_POOL_SIZE: "25"
+      AUTH_TYPE: scram-sha-256
+      ADMIN_USERS: sutr
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U sutr -d sutr"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # Migrations run once, before any replica serves. Two replicas racing
+  # `alembic upgrade head` is a real way to corrupt a schema.
+  migrate:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: sutr:ha
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      postgres-primary:
+        condition: service_healthy
+    environment: *api-environment
+    command: ["uv", "run", "alembic", "upgrade", "head"]
+    restart: "no"
+
+  api-1: &api
+    image: sutr:ha
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *api-environment
+      PORT: "4747"
+    expose:
+      - "4747"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import sys, urllib.request
+          sys.exit(0 if urllib.request.urlopen("http://localhost:4747/health/ready").status == 200 else 1)
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  api-2:
+    <<: *api
+
+  # The relay in its own process. It contends for the same `event_relay` lease
+  # as the API replicas, so exactly one of the three publishes — no flag has to
+  # be set correctly for that to be true.
+  relay:
+    image: sutr:ha
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment: *api-environment
+    command: ["uv", "run", "sutr-event-relay"]
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.10-alpine
+    depends_on:
+      - api-1
+      - api-2
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    volumes:
+      - ./Caddyfile.ha:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  primary-data:
+  replica-data:
+  caddy-data:
+  caddy-config:

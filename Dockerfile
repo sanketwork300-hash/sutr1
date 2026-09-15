@@ -53,6 +53,17 @@ RUN mkdir -p /data
 COPY server/start.sh ./start.sh
 RUN chmod +x ./start.sh
 
+# Run as a non-root user. Found by the Semgrep gate in Phase 13, and it was a
+# real gap rather than a lint: the Helm chart already declared
+# `runAsNonRoot: true` with uid 1000, so an image that only ran as root would
+# either be refused by the kubelet or run with a /data it cannot write.
+#
+# uid 1000 specifically, because that is the number the chart's securityContext
+# names; the two have to agree or the volume is owned by the wrong user.
+RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin sutr \
+ && chown -R sutr:sutr /app /data
+USER sutr
+
 EXPOSE 4747
 
 CMD ["./start.sh"]

@@ -74,7 +74,7 @@ async def test_deploy_builds_and_runs_with_expected_flags(provider):
     fake = provider._fake
     build = next(c for c in fake.commands if c[0] == "build")
     short = str(deployment_id)[:8]
-    assert build[2] == f"sutr-deploy-petstore_runner:{short}"
+    assert build[2] == f"sutr-deploy-petstore_runner:{short}-r1"
 
     run = next(c for c in fake.commands if c[0] == "run")
     joined = " ".join(run)

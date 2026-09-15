@@ -1,0 +1,55 @@
+# OpenTelemetry Collector — the one hop every trace and log takes.
+#
+# Sutr exports OTLP/HTTP spans here (OTEL_EXPORTER_OTLP_ENDPOINT). The collector
+# forwards traces to Tempo and exposes its own metrics for Prometheus to scrape.
+#
+# mTLS: LLD §5.3 asks for it between services and collectors. The receiver's
+# TLS block below is commented out because this repository ships no
+# certificates and generating a CA for someone else's deployment is not
+# something a config file should do. Uncomment it, mount the material, and set
+# OTEL_EXPORTER_OTLP_CERTIFICATE / _CLIENT_CERTIFICATE / _CLIENT_KEY on the
+# application side; those three settings are wired through to the exporter.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+        # tls:
+        #   cert_file: /etc/otel/certs/collector.crt
+        #   key_file: /etc/otel/certs/collector.key
+        #   client_ca_file: /etc/otel/certs/ca.crt
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  # Bounds the collector's own memory before the pipeline does it for us by
+  # being killed.
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 15
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+service:
+  # The collector's own health, scraped by Prometheus at :8888.
+  telemetry:
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/tempo]

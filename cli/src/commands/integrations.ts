@@ -21,17 +21,20 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function openAuthorizationUrl(url: string): Promise<boolean> {
-  const command =
-    process.platform === "darwin"
-      ? "open"
-      : process.platform === "win32"
-        ? "start"
-        : "xdg-open";
+  // Windows has no `open` binary: the equivalent is the shell built-in
+  // `start`, which is why this used `shell: true` there. That put a URL from
+  // the server onto a command line, where `&` starts a second command — so it
+  // is invoked through cmd.exe's own argument handling instead, with the URL
+  // as a separate argument that the shell never parses. The empty string is
+  // `start`'s title argument, which it requires before the target.
+  const isWindows = process.platform === "win32";
+  const command = isWindows ? "cmd.exe" : process.platform === "darwin" ? "open" : "xdg-open";
+  const args = isWindows ? ["/c", "start", "", url] : [url];
 
   return await new Promise<boolean>((resolve) => {
-    const child = spawn(command, [url], {
+    const child = spawn(command, args, {
       stdio: "ignore",
-      shell: process.platform === "win32",
+      shell: false,
     });
 
     child.on("error", () => resolve(false));

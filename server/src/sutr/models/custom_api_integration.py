@@ -26,5 +26,9 @@ class CustomApiIntegration(SQLModel, table=True):
     token_header: str = "Authorization"
     token_format: str = "Bearer {token}"
     tools_json: str = Field(default="[]")
+    # The translated security schemes (openapi/security.py placements), so the
+    # console knows exactly which credentials this API declares. None for
+    # integrations created before per-scheme credentials existed.
+    auth_json: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

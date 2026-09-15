@@ -1,0 +1,39 @@
+# Alertmanager routing.
+#
+# The receivers here go nowhere on purpose. Where an alert should land is a
+# property of the operator's organisation — a PagerDuty routing key, a Slack
+# webhook, an email relay — and inventing one would produce a configuration
+# that looks complete and pages nobody. Add a real receiver below and point the
+# routes at it.
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default
+  group_by: ["alertname", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 12h
+  routes:
+    - matchers:
+        - severity = "critical"
+      receiver: critical
+      # A critical alert waits a little less before it is sent.
+      group_wait: 10s
+      repeat_interval: 1h
+    - matchers:
+        - severity = "info"
+      receiver: default
+      repeat_interval: 24h
+
+inhibit_rules:
+  # While the instance is down every other Sutr alert is a symptom of it.
+  - source_matchers:
+      - alertname = "SutrInstanceDown"
+    target_matchers:
+      - severity =~ "warning|info"
+    equal: ["instance_name"]
+
+receivers:
+  - name: default
+  - name: critical

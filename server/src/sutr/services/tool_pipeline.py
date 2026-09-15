@@ -43,6 +43,7 @@ from sutr.approvals.requests import (
     try_consume_approved_request,
 )
 from sutr.config import settings
+from sutr.credentials.resolve import resolve_for_integration
 from sutr.integrations import registry as integration_registry
 from sutr.integrations.types import CustomIntegration
 from sutr.mcp import client as mcp_client
@@ -50,10 +51,15 @@ from sutr.mcp import oauth as oauth_refresh
 from sutr.models.integration import InstalledIntegration
 from sutr.models.log import LogEntry
 from sutr.models.oauth import OAuthState
+from sutr.models.usage_event import KIND_TOOL_CALL
+from sutr.observability import log_context
 from sutr.observability.metrics import observe_tool_call, observe_tool_gated
 from sutr.observability.tracing import span
+from sutr.provisioning import pdp
 from sutr.rate_limit import tool_call_limiter
-from sutr.services.metering import record_tool_call
+from sutr.services import quota as quota_service
+from sutr.services.metering import record_tool_call, record_usage
+from sutr.services.quota import QuotaVerdict
 from sutr.services.redaction import redact_args, redact_result
 
 logger = logging.getLogger(__name__)
@@ -77,9 +83,16 @@ class CallContext:
     requester_ip: str | None = None
     user_agent: str | None = None
     additional_info: str | None = None
+    # The acting identity (LLD §4.3.1), resolved once at the edge. Optional so
+    # every existing caller keeps working: without one, the tenant and RBAC
+    # layers have nothing to check and the authorization layer is skipped —
+    # which is exactly the behaviour these callers had before it existed.
+    principal: object | None = None
 
     @property
     def requested_by_agent(self) -> str | None:
+        if self.principal is not None:
+            return getattr(self.principal, "urn", None)
         return f"api_key:{self.api_key_id}" if self.api_key_id else None
 
     @classmethod
@@ -91,10 +104,17 @@ class CallContext:
         requester_ip: str | None = None,
         user_agent: str | None = None,
         additional_info: str | None = None,
+        session=None,
     ) -> "CallContext":
+        principal = None
+        if session is not None:
+            from sutr.provisioning import identity
+
+            principal = identity.for_agent_auth(session, auth)
         return cls(
             org_id=auth.org.id,
             source=source,
+            principal=principal,
             api_key_id=auth.api_key.id if auth.api_key else None,
             api_key_label=auth.api_key.name if auth.api_key else None,
             api_key_prefix=auth.api_key.key_prefix if auth.api_key else None,
@@ -107,7 +127,7 @@ class CallContext:
 
 @dataclass
 class GateResult:
-    status: str  # "denied" | "approval_pending" | "rate_limited" | "ready"
+    status: str  # "denied" | "approval_pending" | "rate_limited" | "quota_exceeded" | "ready"
     args_hash: str | None
     approval_request_id: uuid.UUID | None = None
     # approval_pending only:
@@ -115,8 +135,13 @@ class GateResult:
     # ready only:
     access_reason: str | None = None  # "approved_once" | "approved_any" | None
     pending_log_id: int | None = None  # gate log to resolve in place at execution
-    # rate_limited only: seconds until the caller may retry.
+    # rate_limited and quota_exceeded only: seconds until the caller may retry.
     retry_after: int | None = None
+    # quota_exceeded only: which limit, and by how much.
+    quota: "QuotaVerdict | None" = None
+    # denied by layers 1–3 only: which layer refused and what every layer
+    # concluded, so a 403 can carry a reason instead of a verdict.
+    authorization: dict | None = None
 
 
 @dataclass
@@ -149,6 +174,15 @@ def evaluate_gate(
     """Run policy + approval gating. Writes the denied log or the pending
     approval request (+ its gate log); execution side effects happen in
     `execute_tool`."""
+    # Everything logged from here on carries who/what this call is about
+    # (ESDS LLD §5.3). Bound rather than passed, so a log line five frames
+    # down cannot omit it.
+    log_context.bind(
+        tenant_id=str(ctx.org_id),
+        agent_id=ctx.requested_by_agent,
+        provider_id=integration_id,
+        tool_id=tool_name,
+    )
     # Brake before any other work: a runaway agent loop should cost one cheap
     # in-memory check, not a policy lookup and an approval row. Keyed by org,
     # because the realistic failure mode is one credential looping.
@@ -164,6 +198,100 @@ def evaluate_gate(
             )
             return GateResult(status="rate_limited", args_hash=None, retry_after=retry_after)
         tool_call_limiter.record(str(ctx.org_id))
+
+    # Quotas come before policy and before any provider contact (ESDS LLD
+    # §5.1, build prompt §48). A refusal is logged and metered at quantity 0,
+    # so it is auditable without being billed as an execution.
+    verdict = quota_service.evaluate(session, ctx.org_id, integration_id, tool_name)
+    if not verdict.allowed:
+        session.add(
+            LogEntry(
+                org_id=ctx.org_id,
+                integration_id=integration_id,
+                tool_name=tool_name,
+                args_json=redact_args(args),
+                outcome="quota_exceeded",
+                error=verdict.message,
+                requester_ip=ctx.requester_ip,
+                user_agent=ctx.user_agent,
+                api_key_label=ctx.api_key_label,
+                api_key_prefix=ctx.api_key_prefix,
+                impersonator_user_id=ctx.impersonator_user_id,
+                additional_info=ctx.additional_info,
+            )
+        )
+        record_usage(
+            session,
+            org_id=ctx.org_id,
+            kind=KIND_TOOL_CALL,
+            quantity=0,
+            integration_id=integration_id,
+            tool_name=tool_name,
+            source=ctx.source,
+            outcome="quota_exceeded",
+            api_key_prefix=ctx.api_key_prefix,
+            metadata={"quota": verdict.kind, "limit": verdict.limit},
+        )
+        session.commit()
+        observe_tool_gated(ctx.source, "quota_exceeded")
+        logger.warning(
+            "tool call refused by quota: org=%s quota=%s limit=%s used=%s",
+            ctx.org_id,
+            verdict.kind,
+            verdict.limit,
+            verdict.used,
+        )
+        return GateResult(
+            status="quota_exceeded",
+            args_hash=None,
+            retry_after=verdict.retry_after,
+            quota=verdict,
+        )
+
+    # Layers 1–3 of the LLD §4.3 authorization chain: tenant, RBAC, then the
+    # tenant's own attribute rules. Layer 4 is the per-tool policy immediately
+    # below, which is why this runs here and not in a dependency — the four are
+    # ordered, and splitting them across two files would let the order rot.
+    if ctx.principal is not None:
+        authorization = pdp.authorize(
+            session,
+            principal=ctx.principal,
+            org_id=ctx.org_id,
+            resource={"integration_id": integration_id, "tool_name": tool_name},
+            action="invoke",
+            permission="tools:execute",
+        )
+        if not authorization.allowed:
+            session.add(
+                LogEntry(
+                    org_id=ctx.org_id,
+                    integration_id=integration_id,
+                    tool_name=tool_name,
+                    args_json=redact_args(args),
+                    outcome="denied",
+                    # LLD §4.2's hot path: "403 + policy reason". The reason is
+                    # the point; "denied by policy" is not actionable.
+                    error=f"{authorization.denied_by}: {authorization.reason}",
+                    requester_ip=ctx.requester_ip,
+                    user_agent=ctx.user_agent,
+                    api_key_label=ctx.api_key_label,
+                    api_key_prefix=ctx.api_key_prefix,
+                    impersonator_user_id=ctx.impersonator_user_id,
+                    additional_info=ctx.additional_info,
+                )
+            )
+            session.commit()
+            observe_tool_gated(ctx.source, "denied")
+            logger.warning(
+                "tool call refused by %s: org=%s tool=%s/%s",
+                authorization.denied_by,
+                ctx.org_id,
+                integration_id,
+                tool_name,
+            )
+            return GateResult(
+                status="denied", args_hash=None, authorization=authorization.as_dict()
+            )
 
     decision = evaluate_policy(session, ctx.org_id, integration_id, tool_name, args)
 
@@ -330,6 +458,12 @@ async def execute_tool(
     its own so long-poll continuations can call it after their request
     session is gone.
     """
+    log_context.bind(
+        tenant_id=str(ctx.org_id),
+        agent_id=ctx.requested_by_agent,
+        provider_id=integration_id,
+        tool_id=tool_name,
+    )
     with Session(db.engine) as session:
         installed = session.exec(
             select(InstalledIntegration)
@@ -382,25 +516,44 @@ async def execute_tool(
                 failure="tool_not_found",
             )
 
+        # Per-scheme credentials (query/cookie API keys, several schemes at
+        # once, OAuth2 client-credentials tokens) — resolved once per call, in
+        # its own session, and never stored on the result (ADR-009).
+        with Session(db.engine) as session:
+            credentials = await resolve_for_integration(
+                session, ctx.org_id, installed.integration_id
+            )
+
         async def call(state):
             return await api_client.call_tool(
-                installed, tool_def, arguments, state, integration=bundled
+                installed,
+                tool_def,
+                arguments,
+                state,
+                integration=bundled,
+                credentials=credentials,
             )
     else:
 
         async def call(state):
             return await mcp_client.call_tool(installed, tool_name, arguments, state)
 
-    with span(
-        "sutr.tool_call",
-        **{
-            "sutr.integration_id": integration_id,
-            "sutr.tool_name": tool_name,
-            "sutr.source": ctx.source,
-            "sutr.access_reason": gate.access_reason,
-            "sutr.transport": "http" if is_api else "mcp",
-        },
-    ) as active_span:
+    with (
+        quota_service.in_flight(ctx.org_id),
+        span(
+            "sutr.tool_call",
+            **{
+                # The Runtime leg of the LLD §5.3 trace: this span is the
+                # parent of whatever provider hop the transport makes below it.
+                "sutr.stage": "runtime",
+                "sutr.integration_id": integration_id,
+                "sutr.tool_name": tool_name,
+                "sutr.source": ctx.source,
+                "sutr.access_reason": gate.access_reason,
+                "sutr.transport": "http" if is_api else "mcp",
+            },
+        ) as active_span,
+    ):
         result, last_error = await _attempt_with_refresh(call, installed, oauth_state)
         duration_ms = int((time.time() - start) * 1000)
         outcome = "executed" if last_error is None else "error"
@@ -462,6 +615,7 @@ async def execute_tool(
         session.commit()
 
     observe_tool_call(ctx.source, outcome, duration_ms)
+    log_context.bind(status=outcome, duration_ms=duration_ms)
 
     if last_error is not None:
         logger.warning("Tool call failed for %s/%s: %s", integration_id, tool_name, last_error)

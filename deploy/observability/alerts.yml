@@ -1,0 +1,143 @@
+# Alerts for the metrics this build actually exports.
+#
+# Every expression here names a series that `sutr/observability/metrics.py`
+# defines; `tests/test_observability/test_deployment_assets.py` fails the build
+# if that stops being true, because an alert on a metric nobody emits is an
+# alert that will never fire and nobody will notice.
+#
+# Each rule carries a `runbook` annotation naming a section of RUNBOOKS.md, and
+# the same test checks that the section exists.
+groups:
+  - name: sutr-availability
+    rules:
+      - alert: SutrInstanceDown
+        expr: up{job="sutr"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Sutr is not answering scrapes"
+          description: "The scrape target has been down for two minutes."
+          runbook: "sutr-instance-down"
+
+      - alert: SutrHighErrorRate
+        expr: |
+          sum(rate(sutr_http_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(sutr_http_requests_total[5m])), 0.001) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "More than 5% of requests are failing"
+          description: "5xx responses over all requests, averaged across five minutes."
+          runbook: "sutr-high-error-rate"
+
+      - alert: SutrHighRequestLatency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(sutr_http_request_duration_seconds_bucket[5m]))
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 request latency is above two seconds"
+          description: "Measured at this platform's own handler, provider time included."
+          runbook: "sutr-high-request-latency"
+
+  - name: sutr-providers
+    rules:
+      - alert: SutrProviderErrorsHigh
+        expr: |
+          sum(rate(sutr_provider_requests_total{outcome="error"}[10m]))
+            / clamp_min(sum(rate(sutr_provider_requests_total[10m])), 0.001) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "One in five provider calls is failing"
+          description: "Aggregate across providers — /metrics carries no provider label."
+          runbook: "sutr-provider-errors"
+
+      - alert: SutrProviderLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(sutr_provider_request_duration_seconds_bucket[10m]))
+          ) > 5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 provider latency is above five seconds"
+          description: "Upstream slowness; agent calls inherit it directly."
+          runbook: "sutr-provider-latency"
+
+      - alert: SutrToolCallsGated
+        expr: sum(rate(sutr_tool_calls_gated_total{reason="quota_exceeded"}[15m])) > 0
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "Tool calls are being refused for quota"
+          description: "Expected under a deliberate quota; unexpected otherwise."
+          runbook: "sutr-tool-calls-gated"
+
+  - name: sutr-async-path
+    rules:
+      - alert: SutrEventRelayLagging
+        expr: sutr_event_relay_lag_seconds > 300
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The oldest unpublished event is over five minutes old"
+          description: >-
+            Facts are already durable in the outbox, so nothing is lost; what is
+            late is everything downstream of the bus, metering consumers included.
+          runbook: "sutr-event-relay-lagging"
+
+      - alert: SutrDeadLetteredEvents
+        expr: sutr_queue_depth{queue="outbox_dead_letter"} > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Events have been dead-lettered"
+          description: "They exhausted their retries and now need someone to look."
+          runbook: "sutr-dead-lettered-events"
+
+      - alert: SutrOutboxBacklog
+        expr: sutr_queue_depth{queue="outbox_pending"} > 1000
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The outbox is over a thousand rows deep"
+          description: "The relay is not keeping up, or it is not running."
+          runbook: "sutr-outbox-backlog"
+
+      - alert: SutrTelemetrySamplingFailing
+        expr: increase(sutr_telemetry_sample_failures_total[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Queue gauges could not be sampled"
+          description: >-
+            The scrape endpoint could not read the database, so queue depth and
+            relay lag are stale rather than wrong. Treat those two alerts as
+            unreliable until this clears.
+          runbook: "sutr-telemetry-sampling-failing"
+
+  - name: sutr-deployments
+    rules:
+      - alert: SutrDeploymentsFailed
+        expr: sutr_deployments{status="failed"} > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A generated runtime is in the failed state"
+          description: "Existing tools keep serving; this one is not."
+          runbook: "sutr-deployments-failed"

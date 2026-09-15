@@ -1,3 +1,10 @@
+# Upgrading from an image built before the container ran as a non-root user?
+# The data volume is owned by root and Docker will not re-own an existing one.
+# Once, before starting:
+#
+#   docker run --rm -v sutr1_sutr_data:/data alpine chown -R 1000:1000 /data
+#
+# A fresh install needs nothing: the volume inherits ownership from the image.
 services:
   sutr:
     build:

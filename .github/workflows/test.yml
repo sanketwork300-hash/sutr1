@@ -13,12 +13,37 @@ jobs:
       run:
         working-directory: server
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
         with:
           enable-cache: true
       - run: uv sync --extra dev
       - run: uv run pytest -q
+
+  contracts:
+    name: Contract validation
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          enable-cache: true
+      - run: uv sync --extra dev
+      # Build prompt §74/§75: the API and event contracts live in files and are
+      # validated in CI, so a change that breaks a consumer shows up here rather
+      # than in production.
+      - name: Check contracts describe the code
+        run: uv run python scripts/check_contracts.py
+      - name: Check the committed contracts are current
+        run: |
+          uv run python scripts/generate_contracts.py
+          if ! git diff --exit-code -- ../contracts; then
+            echo "::error::contracts/ is out of date. Run: cd server && uv run python scripts/generate_contracts.py"
+            exit 1
+          fi
 
   sdk-python:
     name: Python SDK tests
@@ -27,8 +52,8 @@ jobs:
       run:
         working-directory: sdk/python
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
         with:
           enable-cache: true
       - run: uv sync --extra dev
@@ -42,11 +67,11 @@ jobs:
       run:
         working-directory: sdk/typescript
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           version: 9
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm

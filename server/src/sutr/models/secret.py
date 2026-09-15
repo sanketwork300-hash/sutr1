@@ -11,6 +11,11 @@ class Secret(SQLModel, table=True):
     org_id: uuid.UUID | None = Field(default=None, foreign_key="org.id", index=True)
     kind: str = Field(index=True)
     storage_backend: str = Field(index=True)
+    # Where the secret lives when the backend does not keep it here. This is
+    # the LLD's *"secret reference"* (§4.3): with an external store the row
+    # holds a pointer and the credential is genuinely not in the database.
+    # Empty for the db and db_kms backends, which store the ciphertext above.
+    ref: str = Field(default="")
     value: str | None = None
     encrypted_data_key: str | None = None
     kms_key_id: str | None = None

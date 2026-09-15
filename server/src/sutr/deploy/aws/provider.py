@@ -28,6 +28,7 @@ from sutr.deploy.base import (
     DeploymentProvider,
     DeploySpec,
     ProviderError,
+    ProviderMetrics,
     ProviderStatus,
     ProviderTarget,
 )
@@ -62,6 +63,8 @@ class AwsProvider(DeploymentProvider):
     id = "aws"
     display_name = "AWS App Runner"
     connection_provider = "aws"
+    supports_update = True
+    supports_metrics = True
     creates = (
         "An S3 bucket and ECR repository (if missing), a CodeBuild project and "
         "one build, and an App Runner service with a public HTTPS URL."
@@ -177,7 +180,7 @@ class AwsProvider(DeploymentProvider):
         name = f"{_dns_name(spec.slug)}-{short}"
         repository = _dns_name(spec.slug)
         registry = f"{account}.dkr.ecr.{region}.amazonaws.com"
-        image_uri = f"{registry}/{repository}:{short}"
+        image_uri = f"{registry}/{repository}:{spec.artifact_tag}"
         bucket = f"sutr-mcp-{account}-{region}"
         key = f"packages/{name}.zip"
 
@@ -346,6 +349,34 @@ class AwsProvider(DeploymentProvider):
         if not arn:
             raise ProviderError("This deployment has no App Runner service recorded.")
         return arn
+
+    async def metrics(self, state: dict, target: ProviderTarget) -> ProviderMetrics:
+        """What App Runner's DescribeService reports.
+
+        Request counts, latencies, CPU and memory utilisation live in
+        CloudWatch, which needs its own permissions on the assumed role.
+        Rather than inventing numbers, this reports the configured instance
+        size and readiness, and names what is missing.
+        """
+        try:
+            service = await self._describe(self._client(target), self._arn(state))
+        except AwsError as exc:
+            return ProviderMetrics(source="app runner", unavailable_reason=str(exc))
+        configuration = service.get("InstanceConfiguration") or {}
+        memory = configuration.get("Memory")
+        try:
+            memory_bytes = int(str(memory).rstrip("Gg").strip()) * 1024**3 if memory else None
+        except ValueError:
+            memory_bytes = None
+        return ProviderMetrics(
+            healthy=service.get("Status") == "RUNNING",
+            memory_limit_bytes=memory_bytes,
+            source="app runner DescribeService",
+            unavailable_reason=(
+                "Request counts, latencies and utilisation require CloudWatch "
+                "(GetMetricData on AWS/AppRunner), which the deploy role does not grant."
+            ),
+        )
 
     async def status(self, state: dict, target: ProviderTarget) -> ProviderStatus:
         client = self._client(target)

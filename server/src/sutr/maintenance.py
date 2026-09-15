@@ -13,16 +13,24 @@ from sqlalchemy import delete as sa_delete
 from sqlmodel import Session, col, select
 
 from sutr import db
+from sutr.models.consumed_event import ConsumedEvent
 from sutr.models.google_login_state import GoogleLoginState
+from sutr.models.idempotency_key import IdempotencyKey
 from sutr.models.log import LogEntry
 from sutr.models.oauth_revoked_token import OAuthRevokedToken
 from sutr.models.org import Org
+from sutr.models.outbox_event import PUBLISHED, OutboxEvent
 from sutr.models.tool_approval_request import ToolApprovalRequest
 
 logger = logging.getLogger(__name__)
 
 MAINTENANCE_INTERVAL_SECONDS = 3600
 GOOGLE_LOGIN_STATE_TTL = timedelta(hours=1)
+# How long a published event stays queryable. Long enough to answer "did that
+# event get out?" during an incident; short enough that the outbox stays a
+# queue. A dead-lettered event is never pruned — it is a fact the platform
+# failed to announce, and losing it would hide the failure.
+PUBLISHED_EVENT_RETENTION = timedelta(days=7)
 # Deployment health/metering sampling cadence. Kept short enough that a stopped
 # container is noticed quickly, long enough not to spam the docker daemon.
 DEPLOYMENT_MONITOR_INTERVAL_SECONDS = 300
@@ -36,6 +44,9 @@ def run_maintenance_sweep() -> dict[str, int]:
         "approvals_expired": 0,
         "google_states_pruned": 0,
         "logs_pruned": 0,
+        "idempotency_keys_pruned": 0,
+        "published_events_pruned": 0,
+        "consumed_records_pruned": 0,
     }
     now = datetime.utcnow()  # naive UTC — matches the columns it compares against
 
@@ -84,6 +95,32 @@ def run_maintenance_sweep() -> dict[str, int]:
                 .where(LogEntry.timestamp < log_cutoff)  # type: ignore[arg-type]
             )
             counts["logs_pruned"] += result.rowcount or 0
+
+        # Idempotency keys past their retention window. Keeping them forever
+        # would grow a table whose only purpose is a 24-hour memory.
+        expired_keys = session.execute(
+            sa_delete(IdempotencyKey).where(IdempotencyKey.expires_at < now)  # type: ignore[arg-type]
+        )
+        counts["idempotency_keys_pruned"] = expired_keys.rowcount or 0
+
+        # Published events, once they are older than the audit window. The
+        # outbox is a queue, not the audit log — `audit_event` is the record
+        # that is kept — but published rows are worth retaining briefly so
+        # "did the event get out?" is answerable after the fact.
+        published_cutoff = now - PUBLISHED_EVENT_RETENTION
+        published = session.execute(
+            sa_delete(OutboxEvent)
+            .where(OutboxEvent.state == PUBLISHED)  # type: ignore[arg-type]
+            .where(OutboxEvent.published_at < published_cutoff)  # type: ignore[arg-type]
+        )
+        counts["published_events_pruned"] = published.rowcount or 0
+
+        # Consumption records for events that no longer exist. Kept as long as
+        # the event itself, since their only job is to recognise a redelivery.
+        consumed = session.execute(
+            sa_delete(ConsumedEvent).where(ConsumedEvent.consumed_at < published_cutoff)  # type: ignore[arg-type]
+        )
+        counts["consumed_records_pruned"] = consumed.rowcount or 0
 
         session.commit()
 

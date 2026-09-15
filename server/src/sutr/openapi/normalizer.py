@@ -12,13 +12,16 @@ without re-reading the original document.
 import re
 from typing import Any
 
-from openapi_spec_validator import validate as validate_openapi
-from openapi_spec_validator.validation.exceptions import OpenAPIValidationError
 from pydantic import BaseModel
 
 from sutr.openapi.errors import OpenAPIError, SpecWarning
+from sutr.openapi.fingerprint import IR_VERSION
 from sutr.openapi.limits import MAX_OPERATIONS
+from sutr.openapi.linting import LintFinding, lint_document
+from sutr.openapi.linting.schema_errors import schema_findings
 from sutr.openapi.resolver import resolve_refs
+from sutr.openapi.swagger2 import convert as convert_swagger2
+from sutr.openapi.swagger2 import is_swagger2
 
 _HTTP_METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
 _SERVER_VAR_RE = re.compile(r"\{([^{}]+)\}")
@@ -38,11 +41,16 @@ class Server(BaseModel):
 
 class SecurityScheme(BaseModel):
     name: str  # scheme name in components.securitySchemes
-    type: str  # apiKey | http | oauth2 | openIdConnect
+    type: str  # apiKey | http | oauth2 | openIdConnect | mutualTLS
     scheme: str | None = None  # for http: bearer | basic | ...
     param_name: str | None = None  # for apiKey: the header/query/cookie name
     location: str | None = None  # for apiKey: header | query | cookie
     description: str | None = None
+    # for oauth2: the declared grants, kept intact rather than flattened, so
+    # the platform can actually run one (build prompt §24, ADR-009).
+    flows: dict = {}
+    # for openIdConnect: the discovery document URL.
+    openid_connect_url: str | None = None
 
 
 class NParam(BaseModel):
@@ -58,6 +66,11 @@ class NBody(BaseModel):
     json_schema: dict = {}
     required: bool = False
     description: str | None = None
+    # How the body is encoded on the wire: json | form | multipart | binary |
+    # text. Derived from the media type, and carried all the way through to
+    # both runtimes (build prompt §26 — the content type must be preserved,
+    # not collapsed to JSON).
+    encoding: str = "json"
 
 
 class Operation(BaseModel):
@@ -86,39 +99,102 @@ class ApiDefinition(BaseModel):
     global_security: list[str] = []  # scheme names required by default
     operations: list[Operation] = []
     warnings: list[SpecWarning] = []
+    # Advisory findings from the Spectral-style rule layer. They never block an
+    # import — structural validity is the gate — but they predict how good the
+    # generated tools will be, so they travel with the definition.
+    lint_findings: list[LintFinding] = []
+    # "openapi3" or "swagger2" — which dialect the user actually supplied.
+    # A Swagger 2.0 document is converted before anything else sees it, so
+    # this is the only place the original dialect survives in the IR.
+    source_dialect: str = "openapi3"
+    # Which compiler shape produced this IR. An IR carried forward from an
+    # older build is recognisable rather than silently mixed in (build
+    # prompt §14). See `openapi/fingerprint.py`.
+    ir_version: int = IR_VERSION
 
 
 def validate_spec(document: dict) -> None:
-    """Structural validation against the official OpenAPI meta-schemas."""
+    """Structural validation against the official OpenAPI meta-schemas.
+
+    Raises with *every* violation attached (build prompt §16), not just the
+    first: fixing a large specification one error per round-trip is the
+    behaviour this replaces.
+    """
     version = document.get("openapi") or document.get("swagger")
     if not isinstance(version, str):
         raise OpenAPIError(
             "missing_version", "The document does not declare an 'openapi' version field."
         )
     if version.startswith("2."):
+        # `normalize()` converts Swagger 2.0 before validating, so reaching
+        # here means a caller validated a raw 2.0 document directly.
         raise OpenAPIError(
             "unsupported_version",
-            "Swagger 2.0 is not supported — convert the document to OpenAPI 3.x first.",
+            "This is a Swagger 2.0 document. Import it through `normalize()`, which converts "
+            "it to OpenAPI 3.x first.",
         )
     if not (version.startswith("3.0") or version.startswith("3.1")):
         raise OpenAPIError(
             "unsupported_version", f"Unsupported OpenAPI version '{version}' (need 3.0.x or 3.1.x)."
         )
-    try:
-        validate_openapi(document)
-    except OpenAPIValidationError as exc:
-        # First line of the validator message is the actual problem.
-        message = str(exc).split("\n")[0][:500]
-        raise OpenAPIError("invalid_spec", f"OpenAPI validation failed: {message}")
+    findings = schema_findings(document, version)
+    if findings:
+        summary = findings[0].message
+        count = len(findings)
+        suffix = f" (and {count - 1} more)" if count > 1 else ""
+        raise OpenAPIError(
+            "invalid_spec",
+            f"OpenAPI validation failed: {summary}{suffix}",
+            findings=findings,
+        )
 
 
-def _pick_json_content(content: dict) -> tuple[str, dict] | None:
-    """Choose the JSON-ish media type from a content map."""
-    for ct, media in content.items():
-        base = ct.split(";")[0].strip().lower()
-        if base == "application/json" or base.endswith("+json"):
-            return ct, (media or {}).get("schema") or {}
+def _body_encoding(media_type: str, schema: dict) -> str | None:
+    """Classify a media type into one of the runtime's body encodings.
+
+    Returns None for a media type the runtime cannot construct, so the caller
+    can warn instead of producing a tool that silently sends nothing.
+    """
+    base = media_type.split(";")[0].strip().lower()
+    if base == "application/json" or base.endswith("+json"):
+        return "json"
+    if base == "application/x-www-form-urlencoded":
+        return "form"
+    if base == "multipart/form-data":
+        return "multipart"
+    if base == "application/octet-stream" or base.startswith("image/"):
+        return "binary"
+    if isinstance(schema, dict) and schema.get("format") in ("binary", "byte"):
+        return "binary"
+    if base.startswith("text/") or base in ("application/xml", "application/yaml"):
+        return "text"
     return None
+
+
+# Preference order when an operation offers several media types. JSON first
+# because it maps most faithfully onto MCP's JSON arguments; binary last
+# because it forces base64 on the caller.
+_ENCODING_PREFERENCE = ("json", "form", "multipart", "text", "binary")
+
+
+def _pick_body_content(content: dict) -> tuple[str, dict, str] | None:
+    """Choose the best-supported media type from a content map.
+
+    Returns (media_type, schema, encoding), or None when nothing in the map
+    can be constructed by the runtime.
+    """
+    candidates: list[tuple[int, str, dict, str]] = []
+    for media_type, media in content.items():
+        schema = (media or {}).get("schema") or {}
+        encoding = _body_encoding(str(media_type), schema)
+        if encoding is None:
+            continue
+        candidates.append((_ENCODING_PREFERENCE.index(encoding), str(media_type), schema, encoding))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: c[0])
+    _, media_type, schema, encoding = candidates[0]
+    return media_type, schema, encoding
 
 
 def _security_requirement_names(requirements: Any) -> list[str]:
@@ -132,10 +208,23 @@ def _security_requirement_names(requirements: Any) -> list[str]:
 
 
 def normalize(document: dict) -> ApiDefinition:
-    """Validate + dereference + normalize a parsed OpenAPI dict into the IR."""
+    """Validate + dereference + normalize a parsed OpenAPI dict into the IR.
+
+    A Swagger 2.0 document is converted to OpenAPI 3.0 first (build prompt
+    §17), so every stage downstream of this function — validation, linting,
+    `$ref` resolution, compilation, packaging — only ever sees 3.x.
+    """
+    dialect = "openapi3"
+    conversion_warnings: list[SpecWarning] = []
+    if is_swagger2(document):
+        dialect = "swagger2"
+        document, conversion_warnings = convert_swagger2(document)
     validate_spec(document)
+    # Lint the *original* document: findings must point at the file the user
+    # wrote, not at the dereferenced copy they have never seen.
+    lint_findings = lint_document(document).findings
     resolved = resolve_refs(document)
-    warnings: list[SpecWarning] = []
+    warnings: list[SpecWarning] = list(conversion_warnings)
 
     info = resolved.get("info") or {}
     servers = []
@@ -166,6 +255,8 @@ def normalize(document: dict) -> ApiDefinition:
                 param_name=scheme.get("name"),
                 location=scheme.get("in"),
                 description=scheme.get("description"),
+                flows=scheme.get("flows") if isinstance(scheme.get("flows"), dict) else {},
+                openid_connect_url=scheme.get("openIdConnectUrl"),
             )
         )
 
@@ -204,22 +295,35 @@ def normalize(document: dict) -> ApiDefinition:
             request_body = op.get("requestBody")
             if isinstance(request_body, dict):
                 content = request_body.get("content") or {}
-                picked = _pick_json_content(content)
+                picked = _pick_body_content(content)
                 if picked:
-                    content_type, schema = picked
+                    content_type, schema, encoding = picked
                     body = NBody(
                         content_type=content_type,
                         json_schema=schema,
                         required=bool(request_body.get("required")),
                         description=request_body.get("description"),
+                        encoding=encoding,
                     )
+                    if len(content) > 1:
+                        warnings.append(
+                            SpecWarning(
+                                code="body_media_type_selected",
+                                message=(
+                                    f"The operation offers {sorted(content.keys())}; "
+                                    f"'{content_type}' was selected for the generated tool."
+                                ),
+                                context=f"{method.upper()} {path}",
+                            )
+                        )
                 elif content:
                     warnings.append(
                         SpecWarning(
                             code="unsupported_body",
                             message=(
-                                "Request body uses unsupported media type(s) "
-                                f"{sorted(content.keys())} — only JSON bodies are compiled."
+                                "Request body uses media type(s) "
+                                f"{sorted(content.keys())}, none of which the runtime can "
+                                "construct. The generated tool sends no body."
                             ),
                             context=f"{method.upper()} {path}",
                         )
@@ -264,6 +368,8 @@ def normalize(document: dict) -> ApiDefinition:
         global_security=_security_requirement_names(resolved.get("security")),
         operations=operations,
         warnings=warnings,
+        lint_findings=lint_findings,
+        source_dialect=dialect,
     )
 
 

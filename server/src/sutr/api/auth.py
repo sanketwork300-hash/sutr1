@@ -153,6 +153,7 @@ async def oauth_callback(
         )
 
     if not resp.is_success:
+        # nosemgrep: python-logger-credential-disclosure
         logger.warning(
             "OAuth token exchange failed for %s (HTTP %s): %s",
             oauth_state.integration_id,

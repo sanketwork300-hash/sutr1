@@ -1,0 +1,110 @@
+# Defaults for the Sutr chart.
+#
+# Two values have no default on purpose and the chart refuses to render without
+# them: the image reference and the name of the Secret holding the credentials.
+# A chart that ships a default password is a chart that deploys one.
+
+image:
+  # e.g. ghcr.io/your-org/sutr — required.
+  repository: ""
+  # An exact tag or digest. "latest" is refused: a rolling tag means two
+  # replicas of "the same" release can be running different code.
+  tag: ""
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# The Secret that holds DATABASE_URL and JWT_SECRET_KEY. Required, and created
+# outside this chart — by an operator, an external-secrets controller, or
+# Vault. Every replica must read the *same* JWT_SECRET_KEY or sessions issued
+# by one replica are rejected by the next.
+existingSecret: ""
+
+api:
+  # More than one, because that is what this chart is for. A PodDisruptionBudget
+  # with minAvailable 1 is meaningless at replicas: 1.
+  replicas: 3
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  # Spread replicas across nodes so one node's failure is not the whole
+  # deployment's. ScheduleAnyway rather than DoNotSchedule: on a small cluster,
+  # a scheduling constraint that cannot be satisfied would rather leave the
+  # deployment short than place two replicas together, which is the wrong
+  # trade for availability.
+  topologySpread:
+    enabled: true
+    maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+  # A request may be a long MCP stream, so give it time to finish rather than
+  # cutting it off at the default 30 seconds.
+  terminationGracePeriodSeconds: 90
+
+relay:
+  # The event relay. Exactly one *runs* regardless of this number — the others
+  # wait on the lease — but two Pods mean the work resumes in seconds rather
+  # than after a reschedule.
+  enabled: true
+  replicas: 2
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+# Migrations as a pre-upgrade hook: schema first, then the new replicas. Two
+# replicas racing `alembic upgrade head` is a real way to corrupt a schema, so
+# this is a Job with one Pod and no parallelism.
+migrations:
+  enabled: true
+  backoffLimit: 1
+
+autoscaling:
+  enabled: false
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 4747
+
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  annotations: {}
+  tls: []
+
+# Plain configuration. Anything secret belongs in `existingSecret`.
+config:
+  BASE_URL: ""
+  LOG_FORMAT: "json"
+  REGION: ""
+  # "active" or "standby". A standby serves reads and refuses writes; see
+  # server/src/sutr/platform/mode.py.
+  PLATFORM_MODE: "active"
+  PRIMARY_REGION: ""
+  TRUST_PROXY_HEADERS: "true"
+  # Multiplied by every replica before PostgreSQL sees it.
+  DB_POOL_SIZE: "5"
+  DB_MAX_OVERFLOW: "5"
+  DB_STATEMENT_TIMEOUT_MS: "30000"
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

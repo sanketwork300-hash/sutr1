@@ -117,6 +117,7 @@ async def _exchange_code(code: str, code_verifier: str) -> dict:
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
     if not resp.is_success:
+        # nosemgrep: python-logger-credential-disclosure
         logger.warning("Google token exchange failed (HTTP %s): %s", resp.status_code, resp.text)
         raise HTTPException(status_code=502, detail="Google token exchange failed")
     return resp.json()

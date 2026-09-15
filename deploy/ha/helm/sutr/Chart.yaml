@@ -1,0 +1,15 @@
+apiVersion: v2
+name: sutr
+description: >-
+  The Sutr control and data plane, on Kubernetes, with more than one replica.
+  The chart deploys the application only: PostgreSQL, and any pooler in front
+  of it, are the cluster operator's to run.
+type: application
+# The chart's own version. Bumped when the templates change.
+version: 0.1.0
+# The application version this chart was written against.
+appVersion: "0.1.0"
+keywords:
+  - mcp
+  - api-gateway
+home: https://github.com/sanketwork300-hash/sutr1

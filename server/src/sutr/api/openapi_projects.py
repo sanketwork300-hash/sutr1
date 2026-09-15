@@ -13,6 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
+from sutr import events
 from sutr.analytics import posthog_client
 from sutr.api.custom_api import (
     _allocate_integration_id,
@@ -25,6 +26,7 @@ from sutr.connections.errors import ConnectError
 from sutr.connections.store import access_token, find_connection
 from sutr.db import get_session
 from sutr.dependencies import AgentAuth, get_agent_auth
+from sutr.events import topics
 from sutr.mcp.notifications import notify_tools_changed
 from sutr.mcp.refresh import refresh_one
 from sutr.models.custom_api_integration import CustomApiIntegration
@@ -36,6 +38,7 @@ from sutr.openapi import (
     OpenAPIError,
     compile_definition,
     fetch_spec_from_url,
+    fingerprint,
     normalize,
     parse_spec_text,
     substitute_server_url,
@@ -60,7 +63,24 @@ def _utcnow() -> datetime:
 
 
 def _http_error(exc: OpenAPIError) -> HTTPException:
-    return HTTPException(status_code=400, detail={"error": exc.code, "message": exc.message})
+    """Render a compile failure, with every diagnostic when we have them.
+
+    `message` names the first problem so a CLI line still reads well;
+    `findings` carries all of them so a user can fix a specification in one
+    pass rather than one error per round-trip (build prompt §16).
+    """
+    detail: dict = {"error": exc.code, "message": exc.message}
+    if exc.findings:
+        detail["findings"] = [f.model_dump(mode="json") for f in exc.findings]
+        detail["finding_counts"] = _finding_counts(exc.findings)
+    return HTTPException(status_code=400, detail=detail)
+
+
+def _finding_counts(findings) -> dict[str, int]:
+    counts = {"error": 0, "warning": 0, "info": 0}
+    for finding in findings:
+        counts[finding.severity.value.lower()] += 1
+    return counts
 
 
 class ImportRequest(BaseModel):
@@ -158,8 +178,8 @@ def _definition(project: OpenAPIProject) -> ApiDefinition:
     return ApiDefinition.model_validate_json(project.ir_json)
 
 
-def _resolve_compilation(project: OpenAPIProject, body: "CompileRequest"):
-    """Shared front half of compile and package: base URL, tools, auth.
+def resolve_compilation(project: OpenAPIProject, body: "CompileRequest"):
+    """Shared front half of compile, package and generate: base URL, tools, auth.
 
     Returns (definition, base_url, compile_result, auth, warnings). Raises
     HTTPException on invalid input.
@@ -245,6 +265,8 @@ def _serialize_project(project: OpenAPIProject, *, detail: bool = False) -> dict
                 "suggested_auth": auth.model_dump(),
                 "operations": _operation_summary(definition),
                 "tags": sorted({t for op in definition.operations for t in op.tags}),
+                "lint_findings": [f.model_dump(mode="json") for f in definition.lint_findings],
+                "lint_summary": _finding_counts(definition.lint_findings),
                 "filters": json.loads(project.filters_json),
                 "server_url": project.server_url,
                 "server_variables": json.loads(project.server_variables_json),
@@ -351,8 +373,48 @@ async def import_spec(
         spec_text=spec_text,
         ir_json=definition.model_dump_json(),
         warnings_json=json.dumps([w.model_dump() for w in definition.warnings]),
+        # IR identity, so drift detection has a "before" without re-deriving it
+        # and an IR from an older compiler is recognisable (build prompt §14).
+        ir_version=definition.ir_version,
+        ir_hash=fingerprint.fingerprint(definition),
+        content_hash=fingerprint.content_hash(spec_text),
     )
     session.add(project)
+    session.flush()
+
+    # The control-plane pipeline's first two facts (LLD §3.1). Written in the
+    # same transaction as the project, so an import that rolls back announces
+    # nothing.
+    events.publish(
+        session,
+        topics.API_UPLOADED,
+        tenant_id=agent_auth.org.id,
+        resource_id=str(project.id),
+        producer="source-connectors",
+        payload={
+            "project_id": str(project.id),
+            "source_kind": source_kind,
+            "source_url": source_url,
+            "api_title": definition.title,
+            "api_version": definition.version,
+        },
+    )
+    events.publish(
+        session,
+        topics.TRANSLATION_COMPLETED,
+        tenant_id=agent_auth.org.id,
+        resource_id=str(project.id),
+        producer="translation",
+        payload={
+            "project_id": str(project.id),
+            "openapi_version": definition.openapi_version,
+            "source_dialect": definition.source_dialect,
+            "operation_count": len(definition.operations),
+            "warning_count": len(definition.warnings),
+            "ir_version": definition.ir_version,
+            "ir_hash": project.ir_hash,
+        },
+    )
     session.commit()
     session.refresh(project)
 
@@ -431,7 +493,7 @@ def compile_project(
     if project is None or project.org_id != agent_auth.org.id:
         raise HTTPException(status_code=404, detail="OpenAPI project not found")
 
-    definition, base_url, result, auth, warnings = _resolve_compilation(project, body)
+    definition, base_url, result, auth, warnings = resolve_compilation(project, body)
     tools = [ct.tool for ct in result.tools]
     preview = {
         "tools": [
@@ -473,6 +535,7 @@ def compile_project(
             token_header=auth.token_header,
             token_format=auth.token_format,
             tools_json=tools_json,
+            auth_json=auth.model_dump_json(),
         )
         session.add(integration)
         session.flush()
@@ -482,6 +545,9 @@ def compile_project(
         integration.token_header = auth.token_header
         integration.token_format = auth.token_format
         integration.tools_json = tools_json
+        # Re-record the translated schemes: a re-import may have changed which
+        # credentials the API asks for.
+        integration.auth_json = auth.model_dump_json()
         integration.updated_at = datetime.utcnow()
         session.add(integration)
 
@@ -492,6 +558,32 @@ def compile_project(
     project.server_variables_json = json.dumps(body.server_variables)
     project.updated_at = _utcnow()
     session.add(project)
+
+    events.publish(
+        session,
+        topics.MCP_GENERATED,
+        tenant_id=agent_auth.org.id,
+        resource_id=integration.integration_id,
+        producer="mcp-generator",
+        payload={
+            "project_id": str(project.id),
+            "integration_id": integration.integration_id,
+            "tool_count": len(tools),
+            "base_url": base_url,
+        },
+    )
+    events.publish(
+        session,
+        topics.TOOL_REGISTERED,
+        tenant_id=agent_auth.org.id,
+        resource_id=integration.integration_id,
+        producer="registry",
+        payload={
+            "integration_id": integration.integration_id,
+            "name": integration_name,
+            "tool_count": len(tools),
+        },
+    )
 
     # Refresh downstream consumers exactly like a custom-API edit does.
     _invalidate_tool_cache(session, agent_auth.org.id, integration.integration_id)
@@ -542,7 +634,7 @@ def package_project(
     if project is None or project.org_id != agent_auth.org.id:
         raise HTTPException(status_code=404, detail="OpenAPI project not found")
 
-    definition, base_url, result, auth, _warnings = _resolve_compilation(project, body)
+    definition, base_url, result, auth, _warnings = resolve_compilation(project, body)
 
     try:
         filename, data = build_server_package(

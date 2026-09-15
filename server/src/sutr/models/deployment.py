@@ -20,6 +20,10 @@ class Deployment(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     org_id: uuid.UUID = Field(foreign_key="org.id", index=True)
     project_id: uuid.UUID | None = Field(default=None, foreign_key="openapi_project.id")
+    # The validated runtime artifact this deployment is running, when it was
+    # created from one. Null for a deployment compiled straight from a project,
+    # which is the path that predates the artifact store and still works.
+    artifact_id: uuid.UUID | None = Field(default=None, foreign_key="runtime_artifact.id")
     name: str
     slug: str
     provider: str  # "docker" | "gcp" | "azure" | "aws"
@@ -37,6 +41,9 @@ class Deployment(SQLModel, table=True):
     provider_state_json: str = Field(default="{}")
     package_zip: bytes = Field(sa_type=LargeBinary)
     tool_count: int = Field(default=0)
+    # Which revision is live. History lives in `deployment_revision`, and an
+    # update or rollback moves this pointer rather than replacing the row.
+    current_revision: int = Field(default=1)
     # Name of the env var the runtime token is injected as (None → no auth).
     env_var: str | None = None
     token_secret_id: uuid.UUID | None = Field(default=None, foreign_key="secret.id")

@@ -5,9 +5,10 @@ Responsibilities (Sutr spec §20, §23–§25):
 - deterministic tool naming from operationId (or method+path), with
   documented, deterministic collision handling that fails loudly when unique
   safe names cannot be produced
-- parameter mapping: path/query/header params + JSON request bodies (object
-  bodies are flattened into top-level params; non-object bodies become a
-  single wrapped parameter)
+- parameter mapping: path/query/header params + request bodies of every
+  supported encoding — JSON, form-urlencoded, multipart (with binary parts),
+  binary, and text (object bodies are flattened into top-level params;
+  non-object bodies become a single wrapped parameter)
 - honest, LLM-oriented descriptions assembled only from what the spec states
 """
 
@@ -239,19 +240,80 @@ def _param_from_nparam(np: NParam, warnings: list[SpecWarning], context: str) ->
 _SIMPLE_TYPES = ("string", "number", "integer", "boolean", "array")
 
 
+_BASE64_NOTE = (
+    "Binary content: supply it as a base64-encoded string (MCP tool arguments "
+    "are JSON, so raw bytes cannot be sent directly)."
+)
+
+
+def _binary_body_param(
+    op: Operation, taken_names: set[str], *, text: bool
+) -> tuple[list[Param], str]:
+    """A whole-body parameter for a binary or text request body."""
+    wrapper = _wrapper_name(taken_names)
+    if text:
+        description = (
+            op.request_body.description
+            or f"Raw request body sent as {op.request_body.content_type}."
+        )
+        override = {"type": "string", "description": description}
+    else:
+        description = f"{op.request_body.description or 'Request body.'} {_BASE64_NOTE}".strip()
+        override = {"type": "string", "format": "binary", "description": description}
+    return (
+        [
+            Param(
+                name=wrapper,
+                required=op.request_body.required,
+                description=description,
+                schema_override=override,
+                location="body",
+            )
+        ],
+        wrapper,
+    )
+
+
 def _body_params(
     op: Operation, taken_names: set[str], warnings: list[SpecWarning]
 ) -> tuple[list[Param], str | None]:
-    """Map the JSON request body to params.
+    """Map the request body to params, according to its encoding.
 
-    Object bodies flatten top-level properties into individual params (name-
-    collisions with path/query/header params get a `body_` prefix). Non-object
-    bodies become one wrapped parameter and the tool's `body_param` is set.
+    - `json`, `form`, `multipart`: an object body flattens its top-level
+      properties into individual params (a name collision with a path, query,
+      or header param is reported and skipped, because the argument name *is*
+      the wire key and a rename would send the wrong one).
+    - `binary`, `text`, and non-object JSON bodies: one wrapped parameter,
+      recorded on the tool as `body_param`.
     """
     if op.request_body is None:
         return [], None
+    encoding = op.request_body.encoding
     schema = _clean_schema(op.request_body.json_schema)
     context = f"{op.method} {op.path}"
+
+    if encoding == "binary":
+        return _binary_body_param(op, taken_names, text=False)
+    if encoding == "text":
+        return _binary_body_param(op, taken_names, text=True)
+
+    if encoding in ("form", "multipart") and not (
+        schema.get("type") == "object" or "properties" in schema
+    ):
+        # A form body that is not an object has no field names to map, so
+        # there is nothing honest to generate.
+        warnings.append(
+            SpecWarning(
+                code="unsupported_body",
+                message=(
+                    f"The {op.request_body.content_type} request body declares no object "
+                    "schema, so no form fields could be derived. The generated tool sends "
+                    "no body."
+                ),
+                context=context,
+            )
+        )
+        return [], None
 
     if schema.get("type") == "object" or ("properties" in schema and "type" not in schema):
         required_names = set(schema.get("required") or [])
@@ -274,6 +336,25 @@ def _body_params(
                 )
                 continue
             cleaned = _clean_schema(prop_schema if isinstance(prop_schema, dict) else {})
+            if encoding == "multipart" and cleaned.get("format") in ("binary", "byte"):
+                # A file field: the runtime uploads it as a part, and the
+                # argument carries base64 because MCP arguments are JSON.
+                description = f"{cleaned.get('description') or prop_name}. {_BASE64_NOTE}".strip()
+                params.append(
+                    Param(
+                        name=safe_name,
+                        required=prop_name in required_names,
+                        description=description,
+                        schema_override={
+                            "type": "string",
+                            "format": "binary",
+                            "description": description,
+                        },
+                        location="body",
+                        wire_name=prop_name if safe_name != prop_name else None,
+                    )
+                )
+                continue
             params.append(
                 _param_from_nparam(
                     NParam(
@@ -288,6 +369,21 @@ def _body_params(
                 )
             )
         if schema.get("additionalProperties") and not params:
+            if encoding != "json":
+                # A form body has named fields; a free-form object has none, so
+                # there is nothing to name and nothing honest to generate.
+                warnings.append(
+                    SpecWarning(
+                        code="unsupported_body",
+                        message=(
+                            f"The {op.request_body.content_type} request body is a free-form "
+                            "object with no declared properties, so no form fields could be "
+                            "derived. The generated tool sends no body."
+                        ),
+                        context=context,
+                    )
+                )
+                return [], None
             wrapper = _wrapper_name(taken_names)
             # Free-form object: accept a single wrapped body argument.
             return (
@@ -302,7 +398,21 @@ def _body_params(
                 ],
                 wrapper,
             )
-        return [p for p in params if p is not None], None
+        params = [p for p in params if p is not None]
+        if encoding in ("form", "multipart") and not params:
+            warnings.append(
+                SpecWarning(
+                    code="unsupported_body",
+                    message=(
+                        f"The {op.request_body.content_type} request body declares no "
+                        "properties, so no form fields could be derived. The generated tool "
+                        "sends no body."
+                    ),
+                    context=context,
+                )
+            )
+            return [], None
+        return params, None
 
     # Non-object body (array, string, …): wrap it in a single argument.
     wrapper = _wrapper_name(taken_names)
@@ -418,6 +528,8 @@ def compile_definition(
                     path=tool_path,
                     params=params,
                     body_param=body_param_name,
+                    body_encoding=(op.request_body.encoding if op.request_body else "none"),
+                    body_content_type=(op.request_body.content_type if op.request_body else None),
                 ),
                 operation_id=op.operation_id,
                 method=op.method,

@@ -1,0 +1,126 @@
+# The LLD §5.3 stack, as one local deployment.
+#
+# What this is: otel-collector, prometheus, grafana, loki, tempo, alertmanager
+# and node-exporter, wired together and pinned to exact versions, with configs
+# that are syntax-checked in CI by the project's own tests.
+#
+# What this is NOT: highly available. Every component here runs as a single
+# replica with local storage, which is the opposite of what §5.3 asks for
+# ("All components run HA (replicas / federation / clustering)"). Replication,
+# federation and clustering are Phase 12 work; sketching them here as commented
+# YAML would only make the gap harder to see. kube-state-metrics is likewise
+# absent: it reports on a Kubernetes cluster, and this compose file is not one.
+#
+# Usage:
+#   docker compose -f deploy/observability/docker-compose.observability.yml up -d
+# Then point the application at the collector:
+#   OTEL_ENABLED=true
+#   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
+#   METRICS_ENABLED=true
+name: sutr-observability
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.144.0
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otel/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP — what the application exports to
+      - "8888:8888"   # the collector's own metrics
+    depends_on:
+      - tempo
+
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "9093:9093"
+
+  loki:
+    image: grafana/loki:3.5.8
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./loki.yaml:/etc/loki/config.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+
+  tempo:
+    image: grafana/tempo:2.9.1
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"
+
+  grafana:
+    image: grafana/grafana:12.3.1
+    environment:
+      # Anonymous access is off. RBAC dashboards are a §5.3 requirement, and
+      # the first step is that a dashboard has a viewer with a name.
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_ADMIN_USER: admin
+      # Local default. Change it before this is reachable by anyone else.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_DEFAULT_THEME: light
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
+  node-exporter:
+    image: prom/node-exporter:v1.10.1
+    command:
+      - --path.rootfs=/host
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    ports:
+      - "9100:9100"
+
+  # Ships container stdout to Loki. Commented out by default: it needs the
+  # host's Docker log directory, which is a privileged mount, and a local
+  # developer reading `docker logs` does not need it.
+  # fluent-bit:
+  #   image: fluent/fluent-bit:4.1.4
+  #   volumes:
+  #     - ./fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+  #     - ./parsers.conf:/fluent-bit/etc/parsers.conf:ro
+  #     - /var/lib/docker/containers:/var/lib/docker/containers:ro
+  #   depends_on:
+  #     - loki
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
+  loki-data:
+  tempo-data:
+  grafana-data:

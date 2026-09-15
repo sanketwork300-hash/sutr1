@@ -101,12 +101,43 @@ async def test_import_rejects_invalid_spec(client):
     assert resp.status_code == 400
     assert resp.json()["detail"]["error"] in ("parse_error", "missing_version", "not_an_object")
 
+    # Swagger 2.0 is converted rather than refused (build prompt §17), so a
+    # 2.0 document with no `info` now fails on what is actually wrong with it.
     resp = await client.post(
         "/api/openapi/import",
         json={"source_kind": "paste", "content": json.dumps({"swagger": "2.0", "paths": {}})},
     )
     assert resp.status_code == 400
-    assert resp.json()["detail"]["error"] == "unsupported_version"
+    assert resp.json()["detail"]["error"] == "invalid_spec"
+
+
+async def test_import_accepts_and_converts_a_swagger_2_document(client):
+    swagger2 = {
+        "swagger": "2.0",
+        "info": {"title": "Legacy", "version": "1.0.0"},
+        "host": "legacy.example.com",
+        "basePath": "/api",
+        "schemes": ["https"],
+        "paths": {
+            "/things": {
+                "get": {
+                    "operationId": "listThings",
+                    "summary": "List things.",
+                    "responses": {"200": {"description": "ok"}},
+                }
+            }
+        },
+    }
+    resp = await client.post(
+        "/api/openapi/import", json={"source_kind": "paste", "content": json.dumps(swagger2)}
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["api_title"] == "Legacy"
+    assert body["openapi_version"].startswith("3.0")
+
+    detail = await client.get(f"/api/openapi/{body['id']}")
+    assert detail.json()["servers"][0]["url"] == "https://legacy.example.com/api"
 
 
 async def test_import_from_url_uses_fetcher(client, monkeypatch):
@@ -436,3 +467,77 @@ async def test_an_explicit_token_beats_the_stored_connection(
     )
     assert resp.status_code == 201
     assert seen["token"] == "ghp_explicit"
+
+
+# ── Linting (build prompt §16) ───────────────────────────────────────────────
+
+
+async def test_lint_rules_endpoint_lists_every_rule(client):
+    resp = await client.get("/api/openapi/lint/rules")
+    assert resp.status_code == 200
+    rules = resp.json()
+    assert len(rules) > 20
+    for entry in rules:
+        assert entry["rule_id"]
+        assert entry["severity"] in ("ERROR", "WARNING", "INFO")
+        assert entry["summary"]
+        assert entry["documentation"].endswith(entry["rule_id"])
+
+
+async def test_lint_endpoint_reports_findings_without_importing(client):
+    resp = await client.post(
+        "/api/openapi/lint",
+        json={
+            "content": json.dumps({"openapi": "3.0.0", "info": {}, "paths": {"/a": {"get": {}}}})
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["counts"]["error"] >= 3
+    assert {f["rule_id"] for f in body["findings"]} >= {"oas3-schema"}
+    # Nothing was stored.
+    listing = await client.get("/api/openapi")
+    assert listing.json() == []
+
+
+async def test_lint_endpoint_rejects_a_document_with_no_version(client):
+    resp = await client.post("/api/openapi/lint", json={"content": json.dumps({"paths": {}})})
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error"] == "missing_version"
+
+
+async def test_invalid_spec_import_returns_all_findings(client):
+    resp = await client.post(
+        "/api/openapi/import",
+        json={
+            "source_kind": "paste",
+            "content": json.dumps({"openapi": "3.0.0", "info": {}, "paths": {"/a": {"get": {}}}}),
+        },
+    )
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert detail["error"] == "invalid_spec"
+    assert len(detail["findings"]) >= 3
+    assert detail["finding_counts"]["error"] >= 3
+    first = detail["findings"][0]
+    assert set(first) == {
+        "rule_id",
+        "severity",
+        "message",
+        "location",
+        "json_pointer",
+        "documentation",
+        "remediation",
+    }
+
+
+async def test_project_detail_carries_lint_findings(client):
+    resp = await client.post(
+        "/api/openapi/import", json={"source_kind": "paste", "content": json.dumps(PETSTORE)}
+    )
+    assert resp.status_code == 201
+    detail = await client.get(f"/api/openapi/{resp.json()['id']}")
+    assert detail.status_code == 200
+    body = detail.json()
+    assert "lint_findings" in body
+    assert set(body["lint_summary"]) == {"error", "warning", "info"}

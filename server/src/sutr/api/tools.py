@@ -33,13 +33,18 @@ class CallToolRequest(BaseModel):
     additional_info: str | None = None
 
 
-def _call_context(agent_auth: AgentAuth, request: Request, additional_info: str | None):
+def _call_context(
+    agent_auth: AgentAuth, request: Request, additional_info: str | None, session=None
+):
     return CallContext.from_agent_auth(
         agent_auth,
         source="api",
         requester_ip=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
         additional_info=additional_info,
+        # Resolving the principal here is what lets the authorization layers
+        # run at the gate (LLD §4.3).
+        session=session,
     )
 
 
@@ -124,7 +129,7 @@ async def call_tool(
             status_code=404, detail=f"Installed integration '{integration_id}' not found"
         )
 
-    ctx = _call_context(agent_auth, request, body.additional_info)
+    ctx = _call_context(agent_auth, request, body.additional_info, session=session)
     gate = evaluate_gate(session, ctx, integration_id, body.tool_name, body.args)
 
     if gate.status == "rate_limited":
@@ -138,6 +143,20 @@ async def call_tool(
                     f"Retry in {gate.retry_after or 60}s."
                 ),
                 "retry_after": gate.retry_after,
+                "integration_id": integration_id,
+                "tool_name": body.tool_name,
+            },
+        )
+
+    if gate.status == "quota_exceeded":
+        # 429, not 402 or 403: the request is well-formed and permitted — there
+        # is simply no allowance left in this window (LLD §3.2 error contract).
+        detail = gate.quota.as_detail() if gate.quota else {"error": "quota_exceeded"}
+        return JSONResponse(
+            status_code=429,
+            headers={"Retry-After": str(gate.retry_after or 60)},
+            content={
+                **detail,
                 "integration_id": integration_id,
                 "tool_name": body.tool_name,
             },

@@ -5,9 +5,7 @@ tools, returning results in the same format as the MCP client.
 """
 
 import json
-import re
 import time
-from urllib.parse import quote
 
 import httpx
 from sqlmodel import Session
@@ -16,6 +14,12 @@ from sutr.db import engine
 from sutr.integrations.types import ApiTool, CustomIntegration, CustomTool, Param, TokenAuth
 from sutr.models.integration import InstalledIntegration
 from sutr.models.oauth import OAuthState
+from sutr.observability.metrics import observe_provider_request
+from sutr.observability.propagation import outbound_headers
+from sutr.observability.tracing import span
+from sutr.resilience import breaker, retry
+from sutr.resilience.timeouts import provider_timeout
+from sutr.runtime import request_builder
 from sutr.secrets.records import get_secret_value
 from sutr.token_auth import build_token_auth_headers
 from sutr.upstream_safety import UnsafeUpstreamUrlError, validate_safe_url
@@ -63,89 +67,49 @@ def _token_auth(integration: CustomIntegration | None) -> TokenAuth | None:
 
 
 def params_to_input_schema(params: list[Param]) -> dict:
-    """Convert a list of Param definitions to a JSON Schema object."""
-    properties: dict = {}
-    required: list[str] = []
+    """Convert a list of Param definitions to a JSON Schema object.
 
-    for p in params:
-        if p.schema_override is not None:
-            properties[p.name] = p.schema_override
-        else:
-            prop: dict = {"type": p.type}
-            if p.description:
-                prop["description"] = p.description
-            if p.default is not None:
-                prop["default"] = p.default
-            if p.enum:
-                prop["enum"] = p.enum
-            if p.type == "array" and p.items:
-                prop["items"] = {"type": p.items}
-            properties[p.name] = prop
-        if p.required:
-            required.append(p.name)
-
-    schema: dict = {"type": "object", "properties": properties}
-    if required:
-        schema["required"] = required
-    return schema
+    Delegates to `runtime.request_builder`, which is the same code the
+    generated standalone packages run — the schema an agent sees from the
+    gateway and from a deployed server are the same object by construction
+    (ADR-010).
+    """
+    return request_builder.input_schema([p.model_dump() for p in params])
 
 
 # ---------------------------------------------------------------------------
 # URL / request construction
+#
+# All of it lives in `runtime.request_builder`, which the generated standalone
+# packages embed verbatim (ADR-010). Nothing about how a request is built may
+# be re-implemented here.
 # ---------------------------------------------------------------------------
-
-_PATH_PARAM_RE = re.compile(r"\{(\w+)\}")
 
 
 def _extract_path_params(path: str) -> list[str]:
-    return _PATH_PARAM_RE.findall(path)
+    return request_builder.path_param_names(path)
+
+
+# Thin delegations kept so the long-standing unit tests keep exercising the
+# gateway's contract directly. They must stay one-liners: any logic added here
+# is logic the generated standalone runtime would not have.
 
 
 def _build_url(base_url: str, path: str, args: dict) -> str:
-    url = base_url.rstrip("/") + "/" + path.lstrip("/")
-    for param in _extract_path_params(path):
-        value = args.get(param, "")
-        url = url.replace(f"{{{param}}}", quote(str(value), safe=""))
-    return url
+    return request_builder.build_url(base_url, path, args)
 
 
-def _build_query(tool_def: ApiTool, args: dict) -> dict[str, str]:
-    query_params = [p for p in tool_def.params if p.query or p.location == "query"]
-    return {
-        (p.wire_name or p.name): args[p.name]
-        for p in query_params
-        if p.name in args and args[p.name] is not None
-    }
+def _build_query(tool_def: ApiTool, args: dict) -> dict:
+    return request_builder.build_query([p.model_dump() for p in tool_def.params], args)
 
 
 def _build_param_headers(tool_def: ApiTool, args: dict) -> dict[str, str]:
-    """Headers declared as tool params (location="header"). The caller merges
-    these under the auth headers so agent-supplied values can never override
-    the integration's credential header."""
-    header_params = [p for p in tool_def.params if p.location == "header"]
-    return {
-        (p.wire_name or p.name): str(args[p.name])
-        for p in header_params
-        if args.get(p.name) is not None
-    }
+    return request_builder.build_param_headers([p.model_dump() for p in tool_def.params], args)
 
 
 def _build_body(tool_def: ApiTool, args: dict):
-    """Build the JSON body from args not consumed elsewhere.
-
-    With `body_param` set (OpenAPI non-object bodies), the body is that single
-    argument's raw value. Otherwise: an object of all args that aren't path,
-    query, or header params (legacy behaviour)."""
-    if tool_def.body_param:
-        return args.get(tool_def.body_param)
-    path_params = set(_extract_path_params(tool_def.path))
-    query_params = {p.name for p in tool_def.params if p.query or p.location == "query"}
-    header_params = {p.name for p in tool_def.params if p.location == "header"}
-    excluded = path_params | query_params | header_params
-    # Body keys use the wire name when a param was renamed for tool-arg safety.
-    wire = {p.name: (p.wire_name or p.name) for p in tool_def.params}
-    body = {wire.get(k, k): v for k, v in args.items() if k not in excluded and v is not None}
-    return body if body else None
+    body = request_builder.build_body(tool_def.model_dump(), args)
+    return body["json"] if body["kind"] == request_builder.JSON else None
 
 
 async def _read_response_body(
@@ -226,6 +190,33 @@ def _result_from_response(
     }
 
 
+def _timeout_policy(timeout) -> httpx.Timeout:
+    """Honour a caller's explicit policy; give a bare number the full one.
+
+    Callers that pass a float mean "this many seconds overall", and they should
+    still get separate connect, read and pool limits underneath it.
+    """
+    if isinstance(timeout, httpx.Timeout):
+        return timeout
+    return provider_timeout(float(timeout))
+
+
+def _request_body_size(body: dict) -> int:
+    """Approximate encoded size of a request body, for the size cap."""
+    kind = body["kind"]
+    if kind == request_builder.NONE:
+        return 0
+    if kind == request_builder.JSON:
+        return len(json.dumps(body["json"], separators=(",", ":")).encode())
+    if kind == request_builder.FORM:
+        return sum(len(str(k)) + len(str(v)) + 2 for k, v in body["data"].items())
+    if kind == request_builder.MULTIPART:
+        fields = sum(len(str(k)) + len(str(v)) + 2 for k, v in body["data"].items())
+        return fields + sum(len(part[1]) for part in body["files"].values())
+    content = body["content"]
+    return len(content if isinstance(content, bytes) else content.encode())
+
+
 async def dispatch_api_tool(
     *,
     base_url: str,
@@ -236,14 +227,35 @@ async def dispatch_api_tool(
     follow_redirects: bool = False,
     max_request_body_bytes: int | None = None,
     max_response_bytes: int | None = None,
+    credentials: list[dict] | None = None,
 ) -> dict:
-    """Execute a declarative ApiTool against an HTTP API."""
-    url = _build_url(base_url, tool_def.path, args)
+    """Execute a declarative ApiTool against an HTTP API.
+
+    The request itself is constructed by `runtime.request_builder` — the same
+    module a generated standalone package runs — so the hosted gateway and a
+    deployed server send identical bytes for identical arguments (ADR-010).
+    """
+    try:
+        request = request_builder.build_request(
+            base_url,
+            tool_def.model_dump(),
+            args,
+            auth_headers=headers,
+            credentials=credentials,
+        )
+    except request_builder.RequestBuildError as exc:
+        return {
+            "content": [{"type": "text", "text": str(exc)}],
+            "isError": True,
+            "status_code": None,
+            "duration_ms": 0,
+        }
+
     # Re-validate the full URL at dispatch time. The base URL was checked when
     # the integration was saved, but the hostname's DNS records may have
     # changed (or been crafted) to point at internal IPs since then.
     try:
-        validate_safe_url(url, allow_query=True)
+        validate_safe_url(request["url"], allow_query=True)
     except UnsafeUpstreamUrlError as exc:
         return {
             "content": [{"type": "text", "text": f"Unsafe upstream URL: {exc}"}],
@@ -252,21 +264,9 @@ async def dispatch_api_tool(
             "duration_ms": 0,
         }
 
-    query = _build_query(tool_def, args)
-
-    # Param-declared headers sit UNDER the auth headers: an agent-supplied
-    # header value can never replace the integration's credential header.
-    param_headers = _build_param_headers(tool_def, args)
-    if param_headers:
-        headers = {**param_headers, **headers}
-
-    body = None
-    if tool_def.method.upper() in ("POST", "PUT", "PATCH"):
-        body = _build_body(tool_def, args)
-
-    if body is not None and max_request_body_bytes is not None:
-        body_bytes = json.dumps(body, separators=(",", ":")).encode()
-        if len(body_bytes) > max_request_body_bytes:
+    if max_request_body_bytes is not None:
+        size = _request_body_size(request["body"])
+        if size > max_request_body_bytes:
             return {
                 "content": [{"type": "text", "text": "API request body is too large."}],
                 "isError": True,
@@ -274,18 +274,81 @@ async def dispatch_api_tool(
                 "duration_ms": 0,
             }
 
-    start = time.perf_counter()
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=follow_redirects) as client:
-        async with client.stream(
-            method=tool_def.method.upper(),
-            url=url,
-            params=query or None,
-            json=body,
-            headers=headers,
-        ) as response:
-            body_bytes, truncated = await _read_response_body(response, max_response_bytes)
+    # The Provider end of the LLD §5.3 trace. Trace context rides on the
+    # request so a provider that speaks W3C trace context can parent its own
+    # spans onto this call; a provider that does not simply ignores two
+    # headers. The correlation id goes with it either way, which is what makes
+    # a provider's support ticket findable in this platform's logs.
+    request["headers"] = {**request["headers"], **outbound_headers()}
 
-    duration_ms = int((time.perf_counter() - start) * 1000)
+    # The circuit is keyed by host rather than by integration: two integrations
+    # pointing at the same upstream share its fate, and a host that is down is
+    # down for both.
+    host = httpx.URL(request["url"]).host
+    #
+    # Raised rather than returned as an error result, deliberately: a call the
+    # breaker refused never happened, and returning a result would record it as
+    # an execution — metered, logged as `executed`, and counted against a
+    # provider that was never asked anything. The pipeline turns the exception
+    # into an error outcome, which is what it was.
+    breaker.allow(host)
+
+    start = time.perf_counter()
+    # Attributes name the host and method only. The full URL is deliberately
+    # absent: credentials may be carried in a query string (ADR-009), and a
+    # span leaves the process.
+    with span(
+        "sutr.provider.request",
+        kind="client",
+        **{
+            "sutr.stage": "provider",
+            "http.request.method": request["method"],
+            "server.address": httpx.URL(request["url"]).host,
+        },
+    ) as active_span:
+
+        async def attempt():
+            async with httpx.AsyncClient(
+                timeout=_timeout_policy(timeout), follow_redirects=follow_redirects
+            ) as client:
+                async with client.stream(**request_builder.request_kwargs(request)) as response:
+                    body, truncated = await _read_response_body(response, max_response_bytes)
+                    return response, body, truncated
+
+        try:
+            # Retries apply to transport failures on safe methods only: a
+            # response that arrived reached the provider's application, and
+            # this platform does not know whether that tool was idempotent.
+            response, body_bytes, truncated = await retry.with_retries(
+                attempt, method=request["method"]
+            )
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            observe_provider_request("http", "error", duration_ms)
+            if retry.is_provider_failure(exc):
+                # `str(exc)` on an httpx timeout is often empty, which left an
+                # operator reading `last_error: null` after five failures.
+                # The class name is a poor message and a much better nothing.
+                breaker.record_failure(host, str(exc) or exc.__class__.__name__)
+            if active_span is not None:
+                active_span.record_exception(exc)
+            raise
+
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        outcome = "error" if response.status_code >= 400 else "ok"
+        observe_provider_request("http", outcome, duration_ms)
+        # A 5xx is the provider saying it is broken, so it counts against its
+        # health. A 4xx is the provider working correctly and disagreeing with
+        # the request, so it does not — opening a circuit on a run of 404s
+        # would take a healthy provider out of service.
+        if response.status_code >= 500:
+            breaker.record_failure(host, f"HTTP {response.status_code}")
+        else:
+            breaker.record_success(host)
+        if active_span is not None:
+            active_span.set_attribute("http.response.status_code", response.status_code)
+            active_span.set_attribute("sutr.duration_ms", duration_ms)
+
     return _result_from_response(
         response,
         body_bytes,
@@ -326,8 +389,15 @@ async def call_tool(
     oauth_state: OAuthState | None = None,
     integration: CustomIntegration | None = None,
     auth_headers: dict[str, str] | None = None,
+    credentials: list[dict] | None = None,
 ) -> dict:
-    """Execute a tool call and return an MCP-compatible result dict."""
+    """Execute a tool call and return an MCP-compatible result dict.
+
+    `credentials` carries per-scheme credentials for compiled API integrations
+    (ADR-009): API keys in query strings or cookies, several schemes at once,
+    and OAuth2 client-credentials tokens the platform obtained itself. It is
+    resolved by the caller so this function stays free of database access.
+    """
     headers = (
         auth_headers
         if auth_headers is not None
@@ -342,4 +412,5 @@ async def call_tool(
         tool_def=tool_def,
         args=args,
         headers=headers,
+        credentials=credentials,
     )

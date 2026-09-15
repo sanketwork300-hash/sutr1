@@ -21,7 +21,14 @@ RUN uv sync --frozen --no-dev --extra postgres-binary
 
 EXPOSE 4747
 
+# The development image deliberately stays root: it bind-mounts the working
+# tree from the host, and a uid mismatch between the container and the
+# developer's account turns every edit into a permission error. The production
+# image (`Dockerfile`) runs as uid 1000; this one is never deployed, and the
+# suppression below records that this is a decision rather than an oversight.
+
 # Run migrations then start with --reload for hot reloading.
 # Mount server/src into /app/server/src at runtime for changes to take effect:
 #   docker run -v $(pwd)/server/src:/app/server/src ...
+# nosemgrep: missing-user
 CMD ["sh", "-c", "uv run alembic upgrade head && exec uv run uvicorn sutr.main:app --host 0.0.0.0 --port 4747 --reload"]

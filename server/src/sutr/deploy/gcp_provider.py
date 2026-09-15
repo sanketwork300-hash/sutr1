@@ -27,6 +27,7 @@ from sutr.deploy.base import (
     DeploymentProvider,
     DeploySpec,
     ProviderError,
+    ProviderMetrics,
     ProviderStatus,
     ProviderTarget,
 )
@@ -54,6 +55,8 @@ class GcpProvider(DeploymentProvider):
     id = "gcp"
     display_name = "Google Cloud Run"
     connection_provider = "gcp"
+    supports_update = True
+    supports_metrics = True
     creates = (
         "An Artifact Registry repository (if missing), one Cloud Build build, "
         "and a public Cloud Run service that scales to zero."
@@ -126,7 +129,10 @@ class GcpProvider(DeploymentProvider):
         project, region, repository, token = self._config(spec.target)
         short = str(spec.deployment_id)[:8]
         service = f"{_dns_name(spec.slug)}-{short}"
-        image = f"{region}-docker.pkg.dev/{project}/{repository}/{_dns_name(spec.slug)}:{short}"
+        image = (
+            f"{region}-docker.pkg.dev/{project}/{repository}/"
+            f"{_dns_name(spec.slug)}:{spec.artifact_tag}"
+        )
 
         await self._ensure_repository(project, region, repository, token)
         bucket, obj = await self._upload_source(project, spec, token, short)
@@ -215,7 +221,7 @@ class GcpProvider(DeploymentProvider):
                 tolerate=(409,),
             )
 
-        obj = f"sutr/{spec.slug}-{short}.zip"
+        obj = f"sutr/{spec.slug}-{spec.artifact_tag}.zip"
         await put_bytes(
             f"{STORAGE_UPLOAD_API}/b/{quote(bucket)}/o?uploadType=media&name={quote(obj, safe='')}",
             spec.package_zip,
@@ -415,6 +421,43 @@ class GcpProvider(DeploymentProvider):
                 detail=condition.get("message"),
             )
         return ProviderStatus(state="running")
+
+    async def metrics(self, state: dict, target: ProviderTarget) -> ProviderMetrics:
+        """What the Cloud Run service resource itself reports.
+
+        Replica counts, request rates and latencies live in Cloud Monitoring,
+        which is a different API with a different token audience than the
+        deploy grant covers — the same situation as Container Apps logs. Rather
+        than inventing numbers, this reports readiness from the service
+        resource already being fetched and names what is missing.
+        """
+        token = target.credentials.get("access_token", "")
+        if not token:
+            return ProviderMetrics(
+                source="cloud run", unavailable_reason="No Google Cloud authorization."
+            )
+        service = await request_json(
+            "GET",
+            f"{RUN_API}/{self._service_path(state)}",
+            provider=PROVIDER,
+            token=token,
+            tolerate=(404,),
+        )
+        if service is None:
+            return ProviderMetrics(
+                source="cloud run", unavailable_reason="The Cloud Run service is gone."
+            )
+        condition = service.get("terminalCondition") or {}
+        scaling = service.get("scaling") or {}
+        return ProviderMetrics(
+            healthy=condition.get("state") == "CONDITION_SUCCEEDED",
+            replicas=scaling.get("minInstanceCount"),
+            source="cloud run service resource",
+            unavailable_reason=(
+                "CPU, memory, request counts and latencies require the Cloud Monitoring API "
+                "(monitoring.googleapis.com), which needs a separate authorization scope."
+            ),
+        )
 
     async def _set_ingress(self, state: dict, target: ProviderTarget, ingress: str) -> None:
         token = target.credentials.get("access_token", "")

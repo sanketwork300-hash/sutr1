@@ -73,10 +73,12 @@ async def refresh_tokens(oauth_state: OAuthState) -> OAuthState | None:
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
     except Exception as exc:
+        # nosemgrep: python-logger-credential-disclosure
         logger.warning("Token refresh HTTP request failed: %s", exc)
         return None
 
     if resp.status_code != 200:
+        # nosemgrep: python-logger-credential-disclosure
         logger.warning("Token refresh failed (%s): %s", resp.status_code, resp.text)
         return None
 

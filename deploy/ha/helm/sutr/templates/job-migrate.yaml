@@ -1,0 +1,49 @@
+{{- if .Values.migrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "sutr.fullname" . }}-migrate
+  labels:
+    {{- include "sutr.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    # Before the new replicas, and blocking: a rollout that starts serving
+    # against a schema that has not been migrated fails one request at a time
+    # instead of once, loudly, here.
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  # One Pod. Two `alembic upgrade head` at once is a way to corrupt a schema.
+  parallelism: 1
+  completions: 1
+  template:
+    metadata:
+      labels:
+        {{- include "sutr.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "sutr.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: {{ include "sutr.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["uv", "run", "alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "sutr.fullname" . }}-config
+            - secretRef:
+                name: {{ include "sutr.secretName" . }}
+{{- end }}

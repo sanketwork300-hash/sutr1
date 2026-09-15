@@ -3,8 +3,10 @@ import { authCommand } from "./commands/auth.js";
 import { connectionsCommand } from "./commands/connections.js";
 import { deployCommand } from "./commands/deploy.js";
 import { integrationsCommand } from "./commands/integrations.js";
+import { marketplaceCommand } from "./commands/marketplace.js";
 import { openapiCommand } from "./commands/openapi.js";
 import { outputCommand } from "./commands/output.js";
+import { quotaCommand } from "./commands/quota.js";
 import { toolsCommand } from "./commands/tools.js";
 import { usageCommand } from "./commands/usage.js";
 
@@ -21,8 +23,10 @@ program.addCommand(authCommand);
 program.addCommand(connectionsCommand);
 program.addCommand(deployCommand);
 program.addCommand(integrationsCommand);
+program.addCommand(marketplaceCommand);
 program.addCommand(openapiCommand);
 program.addCommand(outputCommand);
+program.addCommand(quotaCommand);
 program.addCommand(toolsCommand);
 program.addCommand(usageCommand);
 

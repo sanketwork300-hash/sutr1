@@ -5,14 +5,43 @@ nav_title: MCP
 
 # Connecting via MCP
 
-Sutr exposes a single Streamable HTTP MCP endpoint that acts as a gateway to every integration you have installed. Connecting your agent to our MCP allows it to install integrations and call tools on any integrations you have installed, always according to your defined approval policies.
+Sutr exposes an MCP gateway to every integration you have installed. Connecting your agent to it allows the agent to install integrations and call tools on any integration you have installed, always according to your defined approval policies.
 
 ## Endpoint
 
-| Deployment | URL |
+Three transports, all serving the **same** gateway — the same tools, the same approval policies, the
+same logging and metering. Which one you use is a matter of what your client speaks.
+
+| Transport | Endpoint | Use it when |
+|-----------|----------|-------------|
+| Streamable HTTP (**default**) | `POST /mcp` | Your client supports it. This is the current MCP transport and the only one with server-pushed `tools/list_changed` notifications. |
+| SSE | `GET /sse`, then `POST /messages?session_id=…` | Your client only speaks the older SSE transport. |
+| stdio | `sutr-mcp-stdio` (a subprocess) | Your client can only launch a subprocess and cannot open an HTTP session. |
+
+| Deployment | Base |
 |------------|-----|
-| Cloud | `https://app.sutr.sh/mcp` |
-| Self-hosted | `https://<your_domain>/mcp` |
+| Cloud | `https://app.sutr.sh` |
+| Self-hosted | `https://<your_domain>` |
+
+### SSE
+
+`GET /sse` opens the event stream and announces the endpoint to post to; that endpoint carries a
+session id. Both requests are authenticated the same way as `/mcp`, and a `POST /messages` is
+additionally checked against the organization that opened the session — knowing a session id is not
+enough to inject into someone else's stream.
+
+Set `MCP_SSE_ENABLED=false` to turn the SSE transport off.
+
+### stdio
+
+```sh
+SUTR_API_KEY=ap_... sutr-mcp-stdio
+```
+
+Identity comes from `SUTR_API_KEY` in the environment rather than an argument, because an argument
+ends up in the process table where anything on the machine can read it. This is a **single-tenant**
+transport by construction: one process, one key, one organization. It is not a way to serve several
+tenants.
 
 
 ## Authentication

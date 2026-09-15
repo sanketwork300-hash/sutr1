@@ -31,6 +31,7 @@
             "items": [
                 "console",
                 "mcp-builder",
+                "openapi-linting",
                 "connected-accounts",
                 "api",
                 "tool-approvals"

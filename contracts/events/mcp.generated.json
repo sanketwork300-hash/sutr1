@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sutr.sh/contracts/events/mcp.generated.json",
+  "title": "mcp.generated",
+  "description": "Generated MCP artifacts. Immutable fact; never a command.",
+  "type": "object",
+  "x-partition-key": "tool_id",
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique per event."
+    },
+    "event_type": {
+      "type": "string",
+      "description": "The fact that occurred.",
+      "const": "mcp.generated"
+    },
+    "event_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Payload version for this event type. Changes are additive."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "correlation_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Joins every stage of one logical operation."
+    },
+    "tenant_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The organization the fact concerns. Null for platform-wide facts."
+    },
+    "resource_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The entity the fact concerns; also the partition key source."
+    },
+    "producer": {
+      "type": "string",
+      "description": "The component that emitted it."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Type-specific detail."
+    }
+  },
+  "required": [
+    "event_id",
+    "event_type",
+    "event_version",
+    "timestamp",
+    "producer",
+    "payload"
+  ],
+  "additionalProperties": false
+}

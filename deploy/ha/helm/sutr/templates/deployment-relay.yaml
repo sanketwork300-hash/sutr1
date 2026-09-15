@@ -1,0 +1,62 @@
+{{- if .Values.relay.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sutr.fullname" . }}-relay
+  labels:
+    {{- include "sutr.labels" . | nindent 4 }}
+    app.kubernetes.io/component: relay
+spec:
+  # More than one Pod, and still exactly one relay: they contend for the
+  # `event_relay` lease and the losers wait. The second Pod is there so the
+  # work resumes in seconds when the first dies, rather than after a
+  # reschedule.
+  replicas: {{ .Values.relay.replicas }}
+  selector:
+    matchLabels:
+      {{- include "sutr.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: relay
+  template:
+    metadata:
+      labels:
+        {{- include "sutr.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: relay
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "sutr.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: relay
+          image: {{ include "sutr.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          command: ["uv", "run", "sutr-event-relay"]
+          env:
+            # The API replicas would otherwise also relay. Leaving this true
+            # would still be correct — the lease decides — but it would mean
+            # the relay Pods usually lose to an API replica, which is not what
+            # someone deploying them intends.
+            - name: EVENT_RELAY_ENABLED
+              value: "true"
+          envFrom:
+            - configMapRef:
+                name: {{ include "sutr.fullname" . }}-config
+            - secretRef:
+                name: {{ include "sutr.secretName" . }}
+          resources:
+            {{- toYaml .Values.relay.resources | nindent 12 }}
+{{- end }}

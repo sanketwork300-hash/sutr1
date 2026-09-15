@@ -33,6 +33,10 @@ def upsert_secret(
     secret.org_id = org_id
     secret.kind = kind
     secret.storage_backend = settings.secrets_backend
+    # The reference, so an external store can be read back from. Recorded for
+    # every backend, not only the ones that need it: a row that says where its
+    # secret is remains readable after a backend change.
+    secret.ref = ref
     secret.value = stored.value
     secret.encrypted_data_key = stored.encrypted_data_key
     secret.kms_key_id = stored.kms_key_id

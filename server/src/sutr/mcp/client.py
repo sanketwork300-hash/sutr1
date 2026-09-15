@@ -1,3 +1,6 @@
+import time
+
+import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from sqlmodel import Session
@@ -6,6 +9,10 @@ from sutr.db import engine
 from sutr.integrations.registry import CUSTOM_PREFIX
 from sutr.models.integration import InstalledIntegration
 from sutr.models.oauth import OAuthState
+from sutr.observability.metrics import observe_provider_request
+from sutr.observability.propagation import outbound_headers
+from sutr.observability.tracing import span
+from sutr.resilience import breaker
 from sutr.secrets.records import get_secret_value
 
 
@@ -77,15 +84,59 @@ async def call_tool(
     oauth_state: OAuthState | None = None,
 ) -> dict:
     _ensure_safe_upstream(installed)
-    headers = _auth_headers(installed, oauth_state)
-    try:
-        async with streamablehttp_client(installed.url, headers=headers) as (r, w, _):
-            async with ClientSession(r, w) as session:
-                await session.initialize()
-                result = await session.call_tool(tool_name, args)
-                return {
-                    "content": [c.model_dump() for c in result.content],
-                    "isError": result.isError,
-                }
-    except BaseExceptionGroup as eg:
-        raise RuntimeError(_unwrap_exception(eg)) from eg
+    # Trace context and the correlation id ride to the upstream MCP server for
+    # the same reason they ride to an HTTP provider: so the far end's spans and
+    # logs can be joined to this call (LLD §5.3).
+    headers = outbound_headers(_auth_headers(installed, oauth_state))
+
+    # The same circuit as the HTTP transport uses, keyed by host: an upstream
+    # that is failing is failing whichever protocol reaches it.
+    host = httpx.URL(installed.url).host
+    # Raised, not returned: a call the breaker refused never happened, and a
+    # returned result would be recorded as an execution.
+    breaker.allow(host)
+
+    started = time.perf_counter()
+    # The host, not the URL: an upstream MCP URL is user-supplied and can carry
+    # a token in its query string.
+    with span(
+        "sutr.provider.request",
+        kind="client",
+        **{
+            "sutr.stage": "provider",
+            "sutr.transport": "mcp",
+            "sutr.tool_name": tool_name,
+            "server.address": httpx.URL(installed.url).host,
+        },
+    ) as active_span:
+        try:
+            async with streamablehttp_client(installed.url, headers=headers) as (r, w, _):
+                async with ClientSession(r, w) as session:
+                    await session.initialize()
+                    result = await session.call_tool(tool_name, args)
+        except BaseExceptionGroup as eg:
+            observe_provider_request("mcp", "error", _elapsed_ms(started))
+            breaker.record_failure(host, _unwrap_exception(eg))
+            if active_span is not None:
+                active_span.record_exception(eg)
+            raise RuntimeError(_unwrap_exception(eg)) from eg
+        except Exception as exc:
+            observe_provider_request("mcp", "error", _elapsed_ms(started))
+            breaker.record_failure(host, str(exc))
+            raise
+
+        duration_ms = _elapsed_ms(started)
+        observe_provider_request("mcp", "error" if result.isError else "ok", duration_ms)
+        # `isError` is the *tool* saying no, not the server failing: an upstream
+        # that answers is an upstream that is up.
+        breaker.record_success(host)
+        if active_span is not None:
+            active_span.set_attribute("sutr.duration_ms", duration_ms)
+        return {
+            "content": [c.model_dump() for c in result.content],
+            "isError": result.isError,
+        }
+
+
+def _elapsed_ms(started: float) -> int:
+    return int((time.perf_counter() - started) * 1000)

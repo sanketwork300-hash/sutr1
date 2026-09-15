@@ -38,5 +38,13 @@ class OpenAPIProject(SQLModel, table=True):
         default=None, foreign_key="custom_api_integration.id"
     )
     status: str = Field(default="imported")  # imported | compiled
+    # Identity of the IR above (openapi/fingerprint.py), so drift detection has
+    # a "before" to compare against without re-deriving it, and so an IR
+    # produced by an older compiler is recognisable.
+    ir_version: int | None = None
+    ir_hash: str | None = None
+    # Hash of `spec_text`. Distinct from `ir_hash`: a document can be
+    # reformatted without the API changing.
+    content_hash: str | None = None
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)

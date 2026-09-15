@@ -115,7 +115,7 @@ async def _call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     ]
 
 
-def _pipeline_context(additional_info: str | None = None) -> CallContext:
+def _pipeline_context(additional_info: str | None = None, session=None) -> CallContext:
     """Build the pipeline CallContext from this request's MCP contextvars."""
     auth = _current_auth.get()
     meta = _current_request_meta.get()
@@ -125,6 +125,9 @@ def _pipeline_context(additional_info: str | None = None) -> CallContext:
         requester_ip=meta.ip if meta else None,
         user_agent=meta.user_agent if meta else None,
         additional_info=additional_info,
+        # Resolving the principal here is what lets the authorization layers
+        # run at the gate (LLD §4.3).
+        session=session,
     )
 
 
@@ -170,9 +173,8 @@ async def execute_upstream_tool(
         if isinstance(raw, str) and raw.strip():
             additional_info = raw
 
-    ctx = _pipeline_context(additional_info)
-
     with Session(engine) as session:
+        ctx = _pipeline_context(additional_info, session=session)
         # Viewers may browse tools but never execute them (API keys carry no
         # role and keep their documented capabilities).
         try:
@@ -195,6 +197,15 @@ async def execute_upstream_tool(
             "Rate limit reached for this organization's tool calls. Wait "
             f"{gate.retry_after or 60} seconds before trying again — and if you are "
             "looping, stop and reconsider the plan."
+        )
+
+    if gate.status == "quota_exceeded":
+        verdict = gate.quota
+        wait = gate.retry_after or 60
+        return _text(
+            f"{verdict.message if verdict else 'Quota exceeded.'} "
+            f"The allowance resets in about {wait} seconds. Do not retry in a loop — "
+            "tell the human that this organization's quota is exhausted."
         )
 
     if gate.status == "denied":
@@ -308,12 +319,11 @@ async def await_approval(request_id: uuid.UUID) -> list[types.TextContent]:
     if not isinstance(arguments, dict):
         arguments = {}
 
-    ctx = _pipeline_context(additional_info)
-
     # Consume the approve_once record (atomic state transition), or execute
     # under a standing approve-exact-forever grant. For allow_tool_forever /
     # auto_approved the agent should just call the tool directly.
     with Session(engine) as session:
+        ctx = _pipeline_context(additional_info, session=session)
         try:
             ensure_agent_can(session, _current_auth.get(), "tools:execute")
         except HTTPException:

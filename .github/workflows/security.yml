@@ -1,0 +1,163 @@
+name: Security
+
+# The ESDS LLD §5.7 gate order, in one workflow: dependency scan → secret
+# detection → SAST → container scan → licence check → SBOM. Each job fails the build on a
+# CRITICAL finding; lower severities are reported and do not block, because a
+# gate that blocks on everything gets disabled within a week.
+#
+# Signing (Cosign) lives in release.yml, next to the artifact it signs.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # New CVEs land against code that has not changed, so scan on a schedule
+    # as well as on change.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          enable-cache: true
+
+      - name: Audit Python dependencies
+        working-directory: server
+        run: |
+          # The *locked* dependency set, not whatever happens to be installed.
+          # Auditing the environment made `--strict` fail on this repository's
+          # own package, which is not on PyPI and never will be — the gate
+          # would have failed on every run for a reason unrelated to security.
+          uv export --format requirements-txt --no-emit-project --no-dev --no-hashes \
+            > /tmp/locked-requirements.txt
+          uv run --with pip-audit pip-audit --strict --desc --no-deps \
+            -r /tmp/locked-requirements.txt
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 9
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+
+      - name: Audit CLI dependencies
+        working-directory: cli
+        run: |
+          pnpm install --frozen-lockfile
+          # Only a critical advisory fails the build; the rest are reported.
+          pnpm audit --audit-level critical
+
+      - name: Audit UI dependencies
+        working-directory: ui
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm audit --audit-level critical
+
+  secret-scan:
+    name: Secret detection (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Gitleaks reads history: a secret that was committed and then
+          # removed is still a leaked secret.
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Run Semgrep
+        run: semgrep ci --config p/default --config p/python --config p/typescript --error
+        env:
+          SEMGREP_RULES: p/default
+
+  container-scan:
+    name: Container scan (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Build the image
+        run: docker build -t sutr:${{ github.sha }} .
+
+      - name: Scan the image
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        with:
+          image-ref: sutr:${{ github.sha }}
+          format: table
+          # The gate: a CRITICAL vulnerability with a fix available stops the
+          # build. Unfixed criticals are reported but cannot be acted on.
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Scan the repository for vulnerable dependencies and misconfigurations
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          # Reported, not blocking: the image scan above is the gate.
+          exit-code: "0"
+
+  license-check:
+    name: Licence check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Scan dependency licences
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: license
+          # The gate is copyleft that would reach a distributed binary. Trivy
+          # classifies AGPL/GPL/LGPL-family licences as FORBIDDEN or RESTRICTED
+          # by default; anything in those classes fails, everything else is
+          # reported. The policy is Trivy's own rather than a hand-written
+          # allow-list, because a list of "licences we accept" goes stale
+          # silently and a classification does not.
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+
+  sbom:
+    name: SBOM (Syft)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Build the image
+        run: docker build -t sutr:${{ github.sha }} .
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          image: sutr:${{ github.sha }}
+          format: spdx-json
+          artifact-name: sutr-sbom.spdx.json
+          output-file: sutr-sbom.spdx.json
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom
+          path: sutr-sbom.spdx.json
+          retention-days: 90

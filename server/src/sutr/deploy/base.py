@@ -51,11 +51,68 @@ class DeploySpec:
     name: str
     slug: str
     package_zip: bytes
+    # The tenant this runtime belongs to. Providers that isolate per tenant —
+    # a Kubernetes namespace, for one — need it, and deriving it from the
+    # deployment id would give every deployment its own isolation boundary
+    # instead of one per provider (LLD §4.3.8).
+    org_id: uuid.UUID | None = None
     # Runtime secrets injected as environment variables — never baked into
     # the image or the package files.
     env: dict[str, str] = field(default_factory=dict)
     internal_port: int = 8000
     target: ProviderTarget = field(default_factory=ProviderTarget)
+    # Monotonic revision number for this deployment. Providers must include it
+    # in the artifact they build (image tag, object name) so each revision is a
+    # distinct, retained artifact — that is what makes a rollback a re-run of
+    # something already built rather than a rebuild from source (ADR-016).
+    revision: int = 1
+    # The provider state of the deployment being replaced, when updating. Lets
+    # a provider preserve what should not change across an update — a bound
+    # port, an assigned URL — instead of producing a new one.
+    previous_state: dict = field(default_factory=dict)
+
+    @property
+    def artifact_tag(self) -> str:
+        """A per-revision tag, stable for a given (deployment, revision)."""
+        return f"{str(self.deployment_id)[:8]}-r{self.revision}"
+
+
+@dataclass
+class ProviderMetrics:
+    """Runtime measurements, as far as the provider will report them.
+
+    Every field is optional: providers differ in what they expose, and a
+    missing number must read as "not reported" rather than as zero. `source`
+    names where the numbers came from so a reader can judge them, and
+    `unavailable_reason` explains an empty result instead of leaving it blank.
+    """
+
+    cpu_percent: float | None = None
+    memory_bytes: int | None = None
+    memory_limit_bytes: int | None = None
+    request_count: int | None = None
+    error_count: int | None = None
+    latency_ms_p50: float | None = None
+    latency_ms_p95: float | None = None
+    replicas: int | None = None
+    healthy: bool | None = None
+    source: str = ""
+    unavailable_reason: str | None = None
+
+    def as_dict(self) -> dict:
+        return {
+            "cpu_percent": self.cpu_percent,
+            "memory_bytes": self.memory_bytes,
+            "memory_limit_bytes": self.memory_limit_bytes,
+            "request_count": self.request_count,
+            "error_count": self.error_count,
+            "latency_ms_p50": self.latency_ms_p50,
+            "latency_ms_p95": self.latency_ms_p95,
+            "replicas": self.replicas,
+            "healthy": self.healthy,
+            "source": self.source,
+            "unavailable_reason": self.unavailable_reason,
+        }
 
 
 @dataclass
@@ -108,6 +165,51 @@ class DeploymentProvider(ABC):
 
     @abstractmethod
     async def logs(self, state: dict, target: ProviderTarget, tail: int = 100) -> str: ...
+
+    # ── Update, rollback, metrics ────────────────────────────────────────────
+    #
+    # Build prompt §36 forbids implementing an update as delete-then-recreate.
+    # The default below is not that: every provider here names its resources
+    # from the deployment id, so calling `deploy()` again applies a new
+    # revision to the *same* named service — which is exactly what Cloud Run,
+    # Container Apps and App Runner do natively. The per-revision artifact tag
+    # (`spec.artifact_tag`) is what keeps the previous build around, so a
+    # rollback re-runs a retained artifact instead of rebuilding.
+    #
+    # A provider that genuinely cannot update in place must set
+    # `supports_update = False` and say so, rather than silently recreating.
+
+    supports_update: bool = True
+    supports_metrics: bool = False
+
+    async def update(self, spec: DeploySpec) -> dict:
+        """Apply a new revision to an existing deployment.
+
+        Returns the new provider state, same shape as `deploy()`.
+        """
+        if not self.supports_update:
+            raise ProviderError(
+                f"The {self.display_name} provider cannot update a deployment in place."
+            )
+        return await self.deploy(spec)
+
+    async def rollback(self, spec: DeploySpec) -> dict:
+        """Re-apply a previously built revision.
+
+        `spec` carries the retained package and the revision number of the
+        version being restored, so this is a re-run rather than a rebuild from
+        changed source.
+        """
+        return await self.update(spec)
+
+    async def metrics(self, state: dict, target: ProviderTarget) -> ProviderMetrics:
+        """Runtime measurements, where the provider exposes them."""
+        return ProviderMetrics(
+            source=self.id,
+            unavailable_reason=(
+                f"The {self.display_name} provider does not report runtime metrics."
+            ),
+        )
 
 
 class ProviderError(Exception):

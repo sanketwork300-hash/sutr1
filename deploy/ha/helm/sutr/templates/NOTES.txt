@@ -1,0 +1,18 @@
+{{ include "sutr.fullname" . }} is installed with {{ .Values.api.replicas }} API replica(s).
+
+Check that they are ready and that exactly one holds each background job:
+
+  kubectl get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+  kubectl exec deploy/{{ include "sutr.fullname" . }}-api -- \
+    python -c "import urllib.request,json;print(json.load(urllib.request.urlopen('http://localhost:{{ .Values.service.targetPort }}/health/ready'))['leadership'])"
+
+What this chart does NOT do, so nothing waits for it:
+
+  * It deploys no database. PostgreSQL, and any pooler in front of it, are
+    yours to run; point DATABASE_URL at them in the Secret named by
+    `existingSecret`.
+  * It sets up no cross-region replication. `PLATFORM_MODE=standby` makes a
+    region serve reads and refuse writes; promoting one is a database
+    operation, not a Helm value.
+  * It has not been run against a live cluster by its authors. The manifests
+    are rendered and schema-validated in CI; that is not the same thing.

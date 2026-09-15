@@ -1,0 +1,40 @@
+# Secret detection configuration (ESDS LLD §5.7).
+#
+# The default rules are kept in full — this file only adds allowlist entries,
+# and every one of them names a specific file and a specific string. A blanket
+# `paths = ["tests/"]` would be easier and would also mean a real credential
+# committed into a test fixture is never found again.
+#
+# Rule for adding an entry: it must be a value that is *published on purpose*
+# or a placeholder that cannot authenticate anything. If it could authenticate
+# something, it is a finding, not an exception — rotate it and delete it from
+# history.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documented placeholders and deliberately fake test fixtures"
+
+paths = [
+  # Generated scan reports, which quote the findings they describe.
+  '''\.gitleaks-report\.json''',
+  '''\.semgrep-report\.json''',
+]
+
+regexes = [
+  # PostHog *project* API keys are public by design: they are compiled into
+  # the browser bundle, are write-only for event capture, and cannot read
+  # data. A project token in front-end source is correct rather than leaked.
+  # (A PostHog *personal* key, phx_, would be a real finding and is not
+  # allowed here.)
+  '''phc_[A-Za-z0-9]{40,}''',
+  # A truncated JWT used as a placeholder in the API documentation. It is not a
+  # token: it is the first header segment followed by an ellipsis.
+  '''eyJhbGciOiJIUzI1NiIs\.\.\.''',
+  # Fixtures whose whole purpose is to be redacted by the code under test. If
+  # redaction ever stops working, the test fails — which is a better detector
+  # for this string than a secret scanner.
+  '''sk_live_supersecret''',
+  '''my_secret_key_12345''',
+]

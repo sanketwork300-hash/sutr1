@@ -147,7 +147,9 @@ async def test_gcp_builds_then_deploys_and_publishes_the_mcp_url(patch_http):
 
     assert state["url"] == "https://petstore-12345678-uc.a.run.app/mcp"
     assert state["health_url"].endswith("/health")
-    assert state["image"] == "us-central1-docker.pkg.dev/acme-prod/sutr/petstore:12345678"
+    # The tag carries the revision: the previous revision's image stays in the
+    # registry, which is what makes a rollback a re-run rather than a rebuild.
+    assert state["image"] == "us-central1-docker.pkg.dev/acme-prod/sutr/petstore:12345678-r1"
     assert recorder.hit("storage.googleapis.com/upload")
     assert recorder.hit("cloudbuild.googleapis.com")
     assert recorder.hit(":setIamPolicy")
@@ -314,7 +316,7 @@ async def test_azure_builds_in_the_registry_then_runs_a_container_app(patch_http
     state = await AzureProvider().deploy(_spec(AZURE_TARGET))
 
     assert state["url"] == "https://petstore.eastus.azurecontainerapps.io/mcp"
-    assert state["image"] == "acmemcp.azurecr.io/petstore:12345678"
+    assert state["image"] == "acmemcp.azurecr.io/petstore:12345678-r1"
     assert recorder.hit("listBuildSourceUploadUrl")
     assert recorder.hit("scheduleRun")
     assert recorder.hit("containerApps/petstore-12345678")
@@ -493,7 +495,7 @@ async def test_aws_stages_the_package_builds_it_and_starts_app_runner(patch_http
     state = await AwsProvider().deploy(_spec(AWS_TARGET))
 
     assert state["url"] == "https://abc123.us-east-1.awsapprunner.com/mcp"
-    assert state["image"] == "111122223333.dkr.ecr.us-east-1.amazonaws.com/petstore:12345678"
+    assert state["image"] == "111122223333.dkr.ecr.us-east-1.amazonaws.com/petstore:12345678-r1"
     assert state["bucket"] == "sutr-mcp-111122223333-us-east-1"
     ordered = [call for call in handler.calls if "." in call]
     assert "AmazonEC2ContainerRegistry_V20150921.CreateRepository" in ordered

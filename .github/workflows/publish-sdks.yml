@@ -1,0 +1,115 @@
+name: Publish SDKs
+
+# Publishing is deliberately tag-triggered and manual-dispatchable, never
+# automatic on a push to main: a version number that has been published cannot
+# be taken back, so it should be a decision rather than a side effect.
+#
+# Tags:
+#   sdk-python-v0.1.0   → publishes sutr-sdk to PyPI
+#   sdk-ts-v0.1.0       → publishes @sutr/sdk to npm
+#
+# Both jobs verify that the tag matches the version in the manifest before
+# uploading anything, so a mistyped tag fails loudly rather than publishing the
+# wrong version.
+
+on:
+  push:
+    tags:
+      - "sdk-python-v*"
+      - "sdk-ts-v*"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which SDK to publish
+        required: true
+        type: choice
+        options: [python, typescript]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: PyPI (sutr-sdk)
+    if: startsWith(github.ref, 'refs/tags/sdk-python-v') || inputs.target == 'python'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # Trusted publishing: no long-lived PyPI token is stored anywhere.
+      id-token: write
+    defaults:
+      run:
+        working-directory: sdk/python
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          enable-cache: true
+
+      - name: Test before publishing
+        run: |
+          uv sync --extra dev
+          uv run pytest -q
+          uv run ruff check .
+
+      - name: Check the tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag_version="${GITHUB_REF_NAME#sdk-python-v}"
+          pkg_version=$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match pyproject version $pkg_version"
+            exit 1
+          fi
+
+      - name: Build
+        run: uv build
+
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: sdk/python/dist
+
+  typescript:
+    name: npm (@sutr/sdk)
+    if: startsWith(github.ref, 'refs/tags/sdk-ts-v') || inputs.target == 'typescript'
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      # npm provenance requires an OIDC token.
+      id-token: write
+    defaults:
+      run:
+        working-directory: sdk/typescript
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 9
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+          cache-dependency-path: sdk/typescript/pnpm-lock.yaml
+
+      - name: Test before publishing
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run typecheck
+          pnpm run test
+          pnpm run build
+
+      - name: Check the tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag_version="${GITHUB_REF_NAME#sdk-ts-v}"
+          pkg_version=$(node -p "require('./package.json').version")
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $pkg_version"
+            exit 1
+          fi
+
+      - name: Publish
+        run: pnpm publish --access public --no-git-checks --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,0 +1,44 @@
+# Prometheus for a single Sutr instance.
+#
+# One scrape job, because there is one process to scrape: this platform is a
+# modular monolith (ADR-001). The exporters below describe the host it runs on.
+# Federation and HA replica pairs are Phase 12 work and are deliberately absent
+# rather than sketched.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    # Set per deployment. It is what distinguishes two instances' series once
+    # anything federates or remote-writes them.
+    instance_name: sutr-local
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: sutr
+    metrics_path: /metrics
+    # /metrics is off by default and may require a bearer token; set
+    # METRICS_TOKEN and uncomment.
+    # authorization:
+    #   type: Bearer
+    #   credentials_file: /etc/prometheus/metrics_token
+    static_configs:
+      - targets: ["sutr:8000"]
+
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8888"]
+
+  - job_name: node-exporter
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

@@ -25,6 +25,7 @@ const McpBuilderPage = lazy(() => import('@/pages/McpBuilderPage'))
 const ApisPage = lazy(() => import('@/pages/ApisPage'))
 const McpServersPage = lazy(() => import('@/pages/McpServersPage'))
 const ToolsPage = lazy(() => import('@/pages/ToolsPage'))
+const MarketplacePage = lazy(() => import('@/pages/MarketplacePage'))
 const DeploymentsPage = lazy(() => import('@/pages/DeploymentsPage'))
 const UsagePage = lazy(() => import('@/pages/UsagePage'))
 const ApprovalsPage = lazy(() => import('@/pages/ApprovalsPage'))
@@ -40,6 +41,21 @@ const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
 const BillingPage = lazy(() => import('@/pages/BillingPage'))
 const AdminPage = lazy(() => import('@/pages/AdminPage'))
 const PlaygroundPage = lazy(() => import('@/pages/PlaygroundPage'))
+
+// The `/v1` console: one page per platform service, each reading the surface
+// that service actually serves rather than a summary of it.
+const RegistryPage = lazy(() => import('@/pages/v1/RegistryPage'))
+const DiscoveryPage = lazy(() => import('@/pages/v1/DiscoveryPage'))
+const SourcesPage = lazy(() => import('@/pages/v1/SourcesPage'))
+const DocumentationPage = lazy(() => import('@/pages/v1/DocumentationPage'))
+const RuntimesPage = lazy(() => import('@/pages/v1/RuntimesPage'))
+const GovernancePage = lazy(() => import('@/pages/v1/GovernancePage'))
+const AgentsPage = lazy(() => import('@/pages/v1/AgentsPage'))
+const RevenuePage = lazy(() => import('@/pages/v1/RevenuePage'))
+const TelemetryPage = lazy(() => import('@/pages/v1/TelemetryPage'))
+const PlatformPage = lazy(() => import('@/pages/v1/PlatformPage'))
+const ResiliencePage = lazy(() => import('@/pages/v1/ResiliencePage'))
+const EventsPage = lazy(() => import('@/pages/v1/EventsPage'))
 
 /**
  * Console routes moved under /app when the landing page took over `/`.
@@ -126,12 +142,29 @@ export default function App() {
             <Route path="mcp-servers" element={<McpServersPage />} />
             <Route path="tools" element={<ToolsPage />} />
 
+            <Route path="marketplace" element={<MarketplacePage />} />
+            <Route path="registry" element={<RegistryPage />} />
+            <Route path="discovery" element={<DiscoveryPage />} />
+            <Route path="sources" element={<SourcesPage />} />
+            <Route path="documentation" element={<DocumentationPage />} />
+            <Route path="runtimes" element={<RuntimesPage />} />
+            <Route path="governance" element={<GovernancePage />} />
+            <Route path="agents" element={<AgentsPage />} />
+            <Route path="revenue" element={<RevenuePage />} />
+            <Route path="telemetry" element={<TelemetryPage />} />
+            <Route path="platform" element={<PlatformPage />} />
+            <Route path="resilience" element={<ResiliencePage />} />
+            <Route path="events" element={<EventsPage />} />
+
             <Route path="integrations" element={<ConnectionsPage />} />
             <Route
               path="integrations/custom-api/new"
               element={<Navigate to="/app/apis/new" replace />}
             />
-            <Route path="integrations/openapi/new" element={<Navigate to="/app/apis/new" replace />} />
+            <Route
+              path="integrations/openapi/new"
+              element={<Navigate to="/app/apis/new" replace />}
+            />
             <Route
               path="integrations/custom-api/:integrationDbId"
               element={<CustomApiBuilderPage />}
@@ -162,7 +195,10 @@ export default function App() {
           {/* ── Pre-/app links kept alive ── */}
           <Route path="/integrations" element={<LegacyRedirect to="/app/integrations" />} />
           <Route path="/integrations/openapi/new" element={<LegacyRedirect to="/app/apis/new" />} />
-          <Route path="/integrations/custom-api/new" element={<LegacyRedirect to="/app/apis/new" />} />
+          <Route
+            path="/integrations/custom-api/new"
+            element={<LegacyRedirect to="/app/apis/new" />}
+          />
           <Route
             path="/integrations/custom-api/:integrationDbId"
             element={<LegacyCustomApiRedirect />}

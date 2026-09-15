@@ -205,6 +205,87 @@ export interface CustomApiTestResult {
   duration_ms?: number
 }
 
+export interface MarketplaceListing {
+  integration_id: string
+  name: string
+  description: string | null
+  type: string
+  category: string
+  tags: string[]
+  docs_url: string | null
+  auth_methods: string[]
+  /** null when the tool list lives upstream and has not been discovered yet. */
+  tool_count: number | null
+  install_count: number
+  installed: boolean
+  available: boolean
+  available_reason: string | null
+  rating: number | null
+  review_count: number
+  /**
+   * Owned by the Registry service, which is not implemented yet. These come
+   * back as null / empty with `pending_reason` set — never as zeros, because a
+   * trust score of 0 would read as "untrustworthy" rather than "unknown".
+   */
+  trust_score: number | null
+  compliance: string[]
+  regions: string[]
+  pricing: Record<string, unknown> | null
+  versions: string[]
+  pending_fields: string[]
+  pending_reason: string | null
+}
+
+export interface MarketplacePage {
+  total: number
+  limit: number
+  offset: number
+  sort: string
+  listings: MarketplaceListing[]
+}
+
+export interface MarketplaceFacet {
+  category: string
+  count: number
+}
+
+export interface MarketplaceTagFacet {
+  tag: string
+  count: number
+}
+
+export interface MarketplaceReview {
+  id: string
+  integration_id: string
+  rating: number
+  title: string | null
+  body: string | null
+  author: string | null
+  author_user_id: string
+  created_at: string
+  updated_at: string
+}
+
+export interface MarketplaceReviews {
+  integration_id: string
+  rating: number | null
+  review_count: number
+  distribution: Record<string, number>
+  reviews: MarketplaceReview[]
+}
+
+export interface MarketplaceQuery {
+  q?: string
+  category?: string
+  tags?: string[]
+  type?: string
+  installed?: boolean
+  available?: boolean
+  sort?: string
+  limit?: number
+  offset?: number
+}
+
 export interface OpenApiWarning {
   code: string
   message: string
@@ -900,6 +981,50 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       })
+    },
+  },
+  marketplace: {
+    listings(query: MarketplaceQuery = {}) {
+      const params = new URLSearchParams()
+      if (query.q) params.set('q', query.q)
+      if (query.category) params.set('category', query.category)
+      for (const tag of query.tags ?? []) params.append('tag', tag)
+      if (query.type) params.set('type', query.type)
+      if (query.installed) params.set('installed', 'true')
+      if (query.available) params.set('available', 'true')
+      if (query.sort) params.set('sort', query.sort)
+      if (query.limit !== undefined) params.set('limit', String(query.limit))
+      if (query.offset !== undefined) params.set('offset', String(query.offset))
+      const suffix = params.toString()
+      return request<MarketplacePage>(`/marketplace/listings${suffix ? `?${suffix}` : ''}`)
+    },
+    listing(integrationId: string) {
+      return request<MarketplaceListing>(
+        `/marketplace/listings/${encodeURIComponent(integrationId)}`,
+      )
+    },
+    categories() {
+      return request<MarketplaceFacet[]>('/marketplace/categories')
+    },
+    tags(limit = 40) {
+      return request<MarketplaceTagFacet[]>(`/marketplace/tags?limit=${limit}`)
+    },
+    reviews(integrationId: string) {
+      return request<MarketplaceReviews>(
+        `/marketplace/listings/${encodeURIComponent(integrationId)}/reviews`,
+      )
+    },
+    review(integrationId: string, rating: number, title?: string, body?: string) {
+      return request<MarketplaceReview>(
+        `/marketplace/listings/${encodeURIComponent(integrationId)}/reviews`,
+        { method: 'PUT', body: JSON.stringify({ rating, title, body }) },
+      )
+    },
+    deleteReview(integrationId: string, reviewId: string) {
+      return request<void>(
+        `/marketplace/listings/${encodeURIComponent(integrationId)}/reviews/${reviewId}`,
+        { method: 'DELETE' },
+      )
     },
   },
   openapi: {

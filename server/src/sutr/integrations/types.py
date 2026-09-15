@@ -76,6 +76,12 @@ class ApiTool(BaseModel):
     # (for OpenAPI request bodies that aren't JSON objects — arrays, strings).
     # None keeps the legacy behaviour: body = object of all non-path/query/header args.
     body_param: str | None = None
+    # How the body is encoded: json | form | multipart | binary | text | none.
+    # Defaults to json, which is what every hand-built integration produces.
+    body_encoding: str = "json"
+    # The media type the specification declared, preserved verbatim so an API
+    # expecting e.g. application/merge-patch+json still gets it (build prompt §26).
+    body_content_type: str | None = None
 
 
 class CustomTool(BaseModel):
@@ -102,6 +108,11 @@ class BundledIntegration(BaseModel):
     docs_url: str | None = None
     # Optional: maps tool name → category label for grouping in the UI
     tool_categories: dict[str, str] = {}
+    # Marketplace taxonomy. Usually left unset and resolved from
+    # `integrations/categories.py`, which keeps the taxonomy in one editable
+    # place rather than spread across every integration module.
+    category: str | None = None
+    tags: list[str] = []
 
     def is_available(self) -> tuple[bool, str | None]:
         """Return (available, reason). Override in integrations that require env-level setup."""

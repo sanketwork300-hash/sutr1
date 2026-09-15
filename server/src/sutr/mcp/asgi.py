@@ -96,6 +96,7 @@ def _authenticate(scope: dict) -> AgentAuth | None:  # noqa: C901
                     logger.warning("MCP auth: user %s not found or inactive", user_id)
                     return None
                 if int(payload.get("tv") or 0) != int(user.token_version or 0):
+                    # nosemgrep: python-logger-credential-disclosure
                     logger.warning("MCP auth: stale token version for user %s", user_id)
                     return None
                 org = session.get(Org, uuid.UUID(org_id))
@@ -122,6 +123,7 @@ def _authenticate(scope: dict) -> AgentAuth | None:  # noqa: C901
                 logger.warning("MCP auth: legacy JWT — user %s not found or inactive", user_id)
                 return None
             if int(payload.get("tv") or 0) != int(user.token_version or 0):
+                # nosemgrep: python-logger-credential-disclosure
                 logger.warning("MCP auth: stale token version for user %s", user_id)
                 return None
             membership = default_membership(session, user.id)

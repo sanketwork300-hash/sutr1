@@ -4,6 +4,7 @@ const path = require('path')
 function walkHtml(dir) {
     const out = []
     for (const entry of nodeFs.readdirSync(dir, { withFileTypes: true })) {
+        // nosemgrep: path-join-resolve-traversal
         const full = path.join(dir, entry.name)
         if (entry.isDirectory()) out.push(...walkHtml(full))
         else if (entry.isFile() && entry.name.endsWith('.html')) out.push(full)

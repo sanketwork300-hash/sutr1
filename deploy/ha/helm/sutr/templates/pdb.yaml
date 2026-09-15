@@ -1,0 +1,17 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "sutr.fullname" . }}-api
+  labels:
+    {{- include "sutr.labels" . | nindent 4 }}
+spec:
+  # What a node drain may not take away. Without this, a cluster upgrade is
+  # free to evict every replica at once and the platform is down for the length
+  # of one reschedule.
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "sutr.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+{{- end }}

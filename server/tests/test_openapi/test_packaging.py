@@ -51,6 +51,8 @@ EXPECTED_FILES = {
     "requirements.txt",
     "server.py",
     "sutr_runtime.py",
+    "sutr_governance.py",
+    "sutr_metrics.py",
     "test_server.py",
     "tools.json",
 }
@@ -133,7 +135,7 @@ def test_generated_runtime_builds_correct_requests(extracted, monkeypatch):
 
     bundle = rt.load_bundle(extracted / "tools.json")
     get_pet = next(t for t in bundle["tools"] if t["name"] == "get_pet")
-    req = rt.build_request(
+    req = rt.build_tool_request(
         bundle,
         get_pet,
         {"pet_id": "a/b c", "X_Trace_Id": "trace-9"},
@@ -142,14 +144,14 @@ def test_generated_runtime_builds_correct_requests(extracted, monkeypatch):
     assert req["url"] == "https://api.petstore.example.com/v1/pets/a%2Fb%20c"
     assert req["headers"]["X-Trace-Id"] == "trace-9"  # wire name, not arg name
     assert req["headers"]["X-Api-Key"] == "sk_secret"
-    assert req["json_body"] is None  # GET
+    assert req["body"]["kind"] == "none"  # GET
 
     create = next(t for t in bundle["tools"] if t["name"] == "create_pet")
-    req = rt.build_request(bundle, create, {"name": "Rex", "tag": None})
-    assert req["json_body"] == {"name": "Rex"}  # None values dropped
+    req = rt.build_tool_request(bundle, create, {"name": "Rex", "tag": None})
+    assert req["body"] == {"kind": "json", "json": {"name": "Rex"}}  # None values dropped
     assert "X-Api-Key" not in req["headers"]  # no token supplied
 
-    schema = rt.input_schema(get_pet)
+    schema = rt.tool_input_schema(get_pet)
     assert schema["required"] == ["pet_id"]
 
 

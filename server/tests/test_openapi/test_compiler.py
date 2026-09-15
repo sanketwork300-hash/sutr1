@@ -221,7 +221,26 @@ def test_array_body_wrapped():
     assert tool.params[0].schema_override["type"] == "array"
 
 
-def test_non_json_body_warns():
+def test_a_media_type_the_runtime_cannot_construct_warns():
+    """An unconstructible media type must warn, not produce a silent no-body tool."""
+    definition = normalize(
+        _spec(
+            {
+                "/upload": {
+                    "post": _op(
+                        operation_id="upload_file",
+                        requestBody={
+                            "content": {"application/vnd.custom-binary-frame": {"schema": {}}}
+                        },
+                    )
+                }
+            }
+        )
+    )
+    assert any(w.code == "unsupported_body" for w in definition.warnings)
+
+
+def test_a_multipart_body_with_no_properties_warns_at_compile_time():
     definition = normalize(
         _spec(
             {
@@ -236,7 +255,8 @@ def test_non_json_body_warns():
             }
         )
     )
-    assert any(w.code == "unsupported_body" for w in definition.warnings)
+    result = compile_definition(definition)
+    assert any(w.code == "unsupported_body" for w in result.warnings)
 
 
 def test_filters_by_tag_and_path():
@@ -315,7 +335,6 @@ def test_security_translation_bearer_and_basic():
     for scheme, expected in [
         ({"type": "http", "scheme": "bearer"}, "Bearer {token}"),
         ({"type": "http", "scheme": "basic"}, "Basic {token}"),
-        ({"type": "oauth2", "flows": {}}, "Bearer {token}"),
     ]:
         definition = normalize(
             _spec(
@@ -328,7 +347,25 @@ def test_security_translation_bearer_and_basic():
         assert auth.token_format == expected, scheme
 
 
-def test_security_translation_query_api_key_warns():
+def test_oauth2_without_a_flow_is_refused_rather_than_degraded():
+    """Build prompt §24: OAuth2 must not silently become a pasted bearer token.
+
+    A scheme declaring no flow gives the platform no grant to run, so it is
+    reported as unusable instead of pretending a token will appear.
+    """
+    definition = normalize(
+        _spec(
+            {"/x": {"get": _op(operation_id="x")}},
+            components={"securitySchemes": {"s": {"type": "oauth2", "flows": {}}}},
+            security=[{"s": []}],
+        )
+    )
+    auth = translate_security(definition)
+    assert auth.scheme_name is None
+    assert any(w.code == "unsupported_security_scheme" for w in auth.warnings)
+
+
+def test_security_translation_supports_a_query_api_key():
     definition = normalize(
         _spec(
             {"/x": {"get": _op(operation_id="x")}},
@@ -339,8 +376,16 @@ def test_security_translation_query_api_key_warns():
         )
     )
     auth = translate_security(definition)
-    assert auth.scheme_name is None
-    assert any(w.code == "unsupported_security_scheme" for w in auth.warnings)
+    assert auth.scheme_name == "qk"
+    placement = auth.placements[0]
+    assert (placement.location, placement.name, placement.format) == (
+        "query",
+        "api_key",
+        "{token}",
+    )
+    # The single-header storage model cannot hold it, and says so.
+    assert auth.token_header == ""
+    assert any(w.code == "non_header_primary_credential" for w in auth.warnings)
 
 
 def test_server_variable_substitution():

@@ -29,6 +29,7 @@ from sutr.deploy.base import (
     DeploymentProvider,
     DeploySpec,
     ProviderError,
+    ProviderMetrics,
     ProviderStatus,
     ProviderTarget,
 )
@@ -59,6 +60,8 @@ class AzureProvider(DeploymentProvider):
     id = "azure"
     display_name = "Azure Container Apps"
     connection_provider = "azure"
+    supports_update = True
+    supports_metrics = True
     creates = (
         "A resource group, a container registry, a Container Apps environment "
         "(each only if missing), one image build, and a Container App with "
@@ -168,12 +171,12 @@ class AzureProvider(DeploymentProvider):
         short = str(spec.deployment_id)[:8]
         app_name = f"{_dns_name(spec.slug)}-{short}"
         image_repo = _dns_name(spec.slug)
-        image = f"{config['registry']}.azurecr.io/{image_repo}:{short}"
+        image = f"{config['registry']}.azurecr.io/{image_repo}:{spec.artifact_tag}"
 
         await self._ensure_resource_group(config)
         await self._ensure_registry(config)
         relative_path = await self._upload_source(config, spec)
-        await self._build_image(config, relative_path, f"{image_repo}:{short}")
+        await self._build_image(config, relative_path, f"{image_repo}:{spec.artifact_tag}")
         username, password = await self._registry_credentials(config)
         environment_id = await self._ensure_environment(config)
         fqdn = await self._create_app(
@@ -461,6 +464,45 @@ class AzureProvider(DeploymentProvider):
         if not subscription or not resource_group or not app:
             raise ProviderError("This deployment has no Container App recorded.")
         return self._app_url(subscription, resource_group, app)
+
+    async def metrics(self, state: dict, target: ProviderTarget) -> ProviderMetrics:
+        """What the Container App resource itself reports.
+
+        CPU, memory, request counts and latencies live in Azure Monitor — a
+        different API with a different token audience than the deploy grant
+        covers, the same situation as this provider's logs. Rather than
+        inventing numbers, this reports the configured replica range and
+        readiness, and names what is missing.
+        """
+        token = target.credentials.get("access_token", "")
+        if not token:
+            return ProviderMetrics(
+                source="container apps", unavailable_reason="No Azure authorization."
+            )
+        payload = await request_json(
+            "GET",
+            self._state_app_url(state),
+            provider=PROVIDER,
+            token=token,
+            params={"api-version": CONTAINER_APPS_API},
+            tolerate=(404,),
+        )
+        if payload is None:
+            return ProviderMetrics(
+                source="container apps", unavailable_reason="The Container App is gone."
+            )
+        properties = payload.get("properties") or {}
+        scale = ((properties.get("template") or {}).get("scale")) or {}
+        return ProviderMetrics(
+            healthy=properties.get("provisioningState") == "Succeeded",
+            replicas=scale.get("minReplicas"),
+            source="container apps resource",
+            unavailable_reason=(
+                "CPU, memory, request counts and latencies require Azure Monitor "
+                "(management.azure.com/.../providers/microsoft.insights/metrics), which needs "
+                "a separate authorization scope."
+            ),
+        )
 
     async def status(self, state: dict, target: ProviderTarget) -> ProviderStatus:
         token = target.credentials.get("access_token", "")

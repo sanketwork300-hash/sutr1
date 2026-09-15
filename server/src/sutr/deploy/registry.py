@@ -1,8 +1,12 @@
 """Deployment provider registry.
 
-Four targets ship: the local Docker provider and one serverless-container
-provider per major cloud. Availability is answered in two layers, and the
-distinction matters for the message the user reads:
+Five targets ship: the local Docker provider, one serverless-container
+provider per major cloud, and Kubernetes — which is the one that carries the
+LLD's runtime isolation requirements (§4.3.8), because a namespace, a
+NetworkPolicy and a Pod Security Standard are things only it has.
+
+Availability is answered in two layers, and the distinction matters for the
+message the user reads:
 
 - *enabled* — this build and this instance permit the provider at all. Local
   Docker is refused on cloud (multi-tenant) instances because running
@@ -10,6 +14,10 @@ distinction matters for the message the user reads:
   cloud provider is refused when its OAuth app is not configured.
 - *ready* — the specific target the user chose actually works, which needs
   credentials and is therefore checked per deployment in `provider.available`.
+
+Swaraj Cloud is registered as a sixth provider and is permanently disabled with
+a `DOCUMENTATION_REQUIRED` reason: its API is not documented anywhere this code
+can reach, and inventing it is explicitly forbidden (ADR-006).
 """
 
 from sutr.config import settings
@@ -19,12 +27,20 @@ from sutr.deploy.azure_provider import AzureProvider
 from sutr.deploy.base import DeploymentProvider
 from sutr.deploy.docker_provider import DockerProvider
 from sutr.deploy.gcp_provider import GcpProvider
+from sutr.deploy.kubernetes_provider import KubernetesProvider
+from sutr.deploy.swaraj_provider import SwarajCloudProvider
 
 _PROVIDERS: dict[str, DeploymentProvider] = {
     DockerProvider.id: DockerProvider(),
     GcpProvider.id: GcpProvider(),
     AzureProvider.id: AzureProvider(),
     AwsProvider.id: AwsProvider(),
+    # Off unless an operator turns it on and points it at a cluster: it needs
+    # credentials and a base image, neither of which has a sane default.
+    KubernetesProvider.id: KubernetesProvider(),
+    # Registered so it is visible and honestly labelled, not hidden.
+    # Every operation refuses with DOCUMENTATION_REQUIRED (ADR-006).
+    SwarajCloudProvider.id: SwarajCloudProvider(),
 }
 
 _CLOUD_TOGGLES = {
@@ -43,6 +59,22 @@ def provider_enabled(provider_id: str) -> tuple[bool, str | None]:
         if not settings.deploy_docker_enabled:
             return False, "The Docker provider is disabled (DEPLOY_DOCKER_ENABLED=false)."
         return True, None
+
+    if provider_id == "kubernetes":
+        if not settings.kubernetes_enabled:
+            return False, "The Kubernetes provider is disabled (KUBERNETES_ENABLED=false)."
+        from sutr.deploy.kubernetes_provider import NOT_CONFIGURED, cluster_config
+
+        if cluster_config() is None or not settings.kubernetes_runtime_image.strip():
+            return False, NOT_CONFIGURED
+        return True, None
+
+    if provider_id == "swaraj":
+        # Not a toggle and not a missing OAuth app: the provider has no
+        # implementation at all, and says exactly that.
+        from sutr.deploy.swaraj_provider import BLOCKED_REASON
+
+        return False, BLOCKED_REASON
 
     toggle = _CLOUD_TOGGLES.get(provider_id)
     if toggle and not getattr(settings, toggle):
