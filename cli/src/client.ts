@@ -19,10 +19,36 @@ export class ToolDeniedError extends Error {
   }
 }
 
+/**
+ * A non-2xx response, carrying the status so callers can tell "your credential
+ * was rejected" apart from "the server broke" without matching on prose.
+ */
+export class HttpError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "HttpError";
+    this.status = status;
+  }
+}
+
+/** The request outlived its deadline, rather than being refused. */
+export class RequestTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RequestTimeoutError";
+  }
+}
+
 interface RequestOptions {
   method?: string;
   body?: unknown;
   params?: Record<string, string>;
+  /** Use an already-read config instead of re-reading it from disk. */
+  config?: Config;
+  /** Abort the request after this many milliseconds. Unset means no deadline. */
+  timeoutMs?: number;
 }
 
 export function buildHeaders(config: Config, hasBody: boolean): Record<string, string> {
@@ -46,11 +72,13 @@ async function performRequest(
   url: string,
   method: string,
   body: unknown,
+  timeoutMs?: number,
 ): Promise<Response> {
   return await fetch(url, {
     method,
     headers: buildHeaders(config, body !== undefined),
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal: timeoutMs !== undefined ? AbortSignal.timeout(timeoutMs) : undefined,
   });
 }
 
@@ -58,8 +86,8 @@ export async function request<T = unknown>(
   path: string,
   opts: RequestOptions = {},
 ): Promise<T> {
-  const config = readConfig();
-  const { method = "GET", body, params } = opts;
+  const { method = "GET", body, params, timeoutMs } = opts;
+  const config = opts.config ?? readConfig();
 
   const baseUrl = config.url.replace(/\/+$/, "");
   let url = `${baseUrl}${path}`;
@@ -70,9 +98,14 @@ export async function request<T = unknown>(
 
   let res: Response;
   try {
-    res = await performRequest(config, url, method, body);
+    res = await performRequest(config, url, method, body, timeoutMs);
   } catch (e) {
     const msg = (e as Error).message;
+    if ((e as Error).name === "TimeoutError" || (e as Error).name === "AbortError") {
+      throw new RequestTimeoutError(
+        `Request to ${baseUrl} timed out after ${(timeoutMs ?? 0) / 1000}s`,
+      );
+    }
     if (msg.includes("fetch failed") || msg.includes("ECONNREFUSED")) {
       throw new Error(
         `Could not connect to server at ${baseUrl} — is it running?`,
@@ -100,7 +133,8 @@ export async function request<T = unknown>(
   }
 
   if (!res.ok) {
-    throw new Error(
+    throw new HttpError(
+      res.status,
       formatDetail(json.detail) || `HTTP ${res.status}: ${res.statusText}`,
     );
   }

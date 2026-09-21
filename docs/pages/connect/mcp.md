@@ -70,6 +70,23 @@ You can get an API key from the "Connect" page in the Sutr UI. These keys allow 
 
 ## Connect your agent
 
+### The short way
+
+If you have the [CLI](/connect/cli) installed and authenticated, one command verifies the
+connection and writes the entry into the agent's own config file:
+
+```sh
+sutr connect claude-code     # or claude-desktop, cursor, vscode, codex
+sutr connect --list          # what it can configure, and where
+```
+
+It prints the endpoint, the tool count and the policy split, backs up the file it touches, and
+ends by offering the optional [Sutr Skills](/connect/skills) install. See
+[Connecting an agent](/connect/cli#connecting-an-agent) for the flags, the non-interactive
+behaviour and the failure modes.
+
+### By hand
+
 All clients use the same shape: a single `sutr` MCP server pointing at the URL above with the key in an `X-API-Key` header.
 
 ### Claude Desktop
@@ -93,7 +110,8 @@ Restart Claude Desktop. The `sutr__*` tools will appear in the tool list.
 
 ### Claude Code
 
-Edit `.claude/settings.json` (project) or `~/.claude/settings.json` (global):
+Edit `./.mcp.json` (project) or `~/.claude.json` (user) — the same files `sutr connect claude-code`
+writes:
 
 ```json
 {

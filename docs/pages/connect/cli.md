@@ -58,6 +58,142 @@ ap auth logout   # wipe stored credentials
 
 ---
 
+## Connecting an agent
+
+`sutr connect` is the one command that wires an AI agent into the gateway. Run it with no
+arguments to verify the connection and print the setup, or name an agent to have the CLI write
+the MCP entry into that agent's own configuration file.
+
+```sh
+sutr connect                    # verify the connection, print the endpoint and the config shape
+sutr connect claude-code        # write the MCP entry into ./.mcp.json
+sutr connect --list             # agents the CLI can configure, and where each keeps its config
+```
+
+```text
+$ sutr connect claude-code
+
+  ╭────────────────────────────────────╮
+  │  Sutr                              │
+  │  Secure tool access for AI agents  │
+  ╰────────────────────────────────────╯
+
+  ◆ Connecting Claude Code to Sutr...
+
+  ✓ Checking configuration       https://app.sutr.sh
+  ✓ Authenticating session       organization credential ap_1a2b...9z8y
+  ✓ Verifying the MCP endpoint   https://app.sutr.sh/mcp
+  ✓ Loading available tools      50 tools across 2 integrations
+  ✓ Reading access policies      12 auto-approve · 37 need approval · 1 denied
+  ✓ Writing agent configuration  /home/you/project/.mcp.json
+
+  ✦ Sutr is ready.
+
+  Your agent can reach 50 tools across 2 integrations,
+  with your approval policies enforced on every call.
+
+  Credential: ap_1a2b...9z8y
+  MCP endpoint: https://app.sutr.sh/mcp
+  Agent: Claude Code (MCP)
+  Config file: /home/you/project/.mcp.json (created)
+
+  Restart Claude Code (or run /mcp) to pick up the server.
+
+  Next step:
+  Install Sutr Skills so your agent knows how to use Sutr:
+
+  npx skills add sutr-dev/sutr-skills
+```
+
+Every line above is the result of an operation that actually ran: the configuration is read, the
+stored credential is presented to the server, the `/mcp` route is probed, the tool list is fetched,
+and the policy split is computed from that list. Nothing is announced before it has happened.
+
+### What it configures
+
+| Agent | Scope | File |
+|-------|-------|------|
+| `claude-code` | `project` (default), `user` | `./.mcp.json`, `~/.claude.json` |
+| `claude-desktop` | `user` | `claude_desktop_config.json` (via the `mcp-remote` bridge) |
+| `cursor` | `user` (default), `project` | `~/.cursor/mcp.json`, `./.cursor/mcp.json` |
+| `vscode` | `project` | `./.vscode/mcp.json` |
+| `codex` | `user` | `~/.codex/config.toml` |
+
+The CLI merges a single `sutr` entry into whatever is already in the file, keeps the previous
+contents next to it as `<file>.sutr-backup`, and restricts the file to `0600` when the entry
+carries your API key. If it cannot parse the file, or Codex already has an `[mcp_servers.sutr]`
+table, it prints the entry to add and changes nothing.
+
+Before writing, it shows the exact change — with the key masked — and asks. Pass `--yes` to skip
+the prompt, or `--dry-run` to see the change without applying it. In a non-interactive shell
+(a pipe, CI, a container) it refuses to modify a file unless `--yes` was given.
+
+### Flags
+
+| Flag | Purpose |
+|------|---------|
+| `--list` | List the agents the CLI can configure. Works with `-o json`. |
+| `--scope <user\|project>` | Where to write the entry. Defaults per agent, as above. |
+| `--no-api-key` | Leave the key out of the config; the client authenticates itself (OAuth). |
+| `--no-animation` | Static output: no spinner, no in-place redrawing. |
+| `--quiet` | Only warnings, failures and machine-readable output. |
+| `-y, --yes` | Apply the configuration change without asking. |
+| `--dry-run` | Show the change, write nothing. |
+| `--timeout <seconds>` | Per-request deadline. Default `20`. |
+| `-o, --output <format>` | `human`, `json` or `toon`. |
+
+### Non-interactive behaviour
+
+The terminal experience adapts to where the output is going; scripts and CI see plain text.
+
+- Animation is on only when the output stream is a TTY. A pipe, a file, a CI job
+  (`CI=true`, `GITHUB_ACTIONS`) or `SUTR_NO_ANIMATION=1` all get static lines instead.
+- `NO_COLOR` (any non-empty value) removes every ANSI escape; `FORCE_COLOR` puts it back.
+- Terminals that cannot render box-drawing glyphs — a bare Windows console, `LANG=C` — get an
+  ASCII fallback. `SUTR_ASCII=1` forces it.
+- With `-o json` or `-o toon`, stdout carries only the result document and all progress moves to
+  stderr, so `sutr connect -o json | jq` is safe. On failure, stdout carries
+  `{"error": {"title": …, "reason": …, "hint": …}}` and the exit code is `1`.
+- Exit codes: `0` success, `1` failure, `130` interrupted (ctrl-c) or declined at the prompt.
+
+### When it fails
+
+Failures name the step that failed, the underlying reason, and the next command to run:
+
+```text
+  ✓ Checking configuration       https://app.sutr.sh
+  ✗ Authenticating session
+
+  ✗ Authentication failed
+
+  Reason: HTTP 401 — Invalid API key
+
+  Next step:
+  Create an API key in the Sutr UI under Develop → API Keys, then run:
+  sutr auth login --api-key ap_...
+```
+
+| Symptom | What to do |
+|---------|-----------|
+| `Not authenticated` / `HTTP 401` | The stored key is missing or rejected. `sutr auth login --api-key ap_...`. |
+| `Could not connect to Sutr` | The instance is unreachable. Check `sutr auth status`, then the URL and your network. |
+| `Timed out` | The server did not answer within `--timeout` seconds. Raise it, or check the instance. |
+| `MCP endpoint not found` | The URL does not point at a Sutr instance, or it predates the MCP gateway. |
+| `Invalid configuration` | The stored URL is not an `http(s)` URL. `sutr auth set-instance-url https://app.sutr.sh`. |
+| `Refusing to change a configuration file unattended` | Re-run with `--yes`, or with `--dry-run` first. |
+| `Could not read the agent configuration` | The agent's config file is not valid JSON. Fix it, or move it aside. |
+
+### Three separate things
+
+- **Connectivity** — `sutr connect` points your agent at the `/mcp` endpoint. That is this command.
+- **Authentication and policy** — your API key identifies the organisation, and the server enforces
+  the per-tool approval policy on every call. Nothing about that lives in the agent's config.
+- **[Sutr Skills](/connect/skills)** — a separate repository, installed by you with
+  `npx skills add sutr-dev/sutr-skills`, that teaches the agent the conventions of the gateway.
+  Sutr works without them; the CLI only ever shows the command, and never runs it.
+
+---
+
 ## Output formats
 
 Every command takes `-o <format>` where `<format>` is one of:
@@ -74,7 +210,8 @@ ap output json
 
 ## Command reference
 
-There are four command groups: `auth`, `integrations`, `tools`, and `output`.
+The groups are `auth`, `connect`, `connections`, `deploy`, `integrations`, `marketplace`,
+`openapi`, `output`, `quota`, `tools` and `usage`. The most used ones are documented below.
 
 ### `ap auth`
 
@@ -182,6 +319,7 @@ See [Tool Approvals](/tool-approvals) for how the approval flow works on the ser
 | Goal | Command |
 |------|---------|
 | Am I logged in? | `ap auth status -o json` |
+| Connect my agent | `sutr connect <agent>` (`sutr connect --list` for the agents) |
 | What's installed? | `ap integrations list --installed -o json` |
 | What's available? | `ap integrations list --available -o json` |
 | What tools does X expose? | `ap tools list --integration <id> -o json` |

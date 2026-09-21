@@ -19,7 +19,9 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "dev": "tsup --watch"
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "commander": "^12",
@@ -29,6 +31,7 @@
   "devDependencies": {
     "@types/node": "^22",
     "typescript": "^5",
-    "tsup": "^8"
+    "tsup": "^8",
+    "vitest": "^2"
   }
 }

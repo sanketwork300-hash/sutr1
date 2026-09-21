@@ -27,6 +27,17 @@ const GROUPS = [
     ],
   },
   {
+    name: 'connect',
+    summary: 'Wire an AI agent into the gateway over MCP.',
+    commands: [
+      { cmd: 'sutr connect', note: 'Verify the connection and print the setup' },
+      { cmd: 'sutr connect claude-code', note: 'Write the MCP entry into ./.mcp.json' },
+      { cmd: 'sutr connect --list', note: 'Agents it can configure, and where each keeps its config' },
+      { cmd: 'sutr connect cursor --dry-run', note: 'Show the change without writing it' },
+      { cmd: 'sutr connect vscode --yes --no-animation', note: 'Unattended, static output' },
+    ],
+  },
+  {
     name: 'tools',
     summary: 'List, inspect and call governed tools.',
     commands: [
@@ -123,7 +134,10 @@ sutr auth status`}
             />
             <p className="sutr-meta" style={{ marginTop: 10 }}>
               Every command accepts <code className="sutr-code--inline">-o json</code> for
-              scripting.
+              scripting. Once authenticated,{' '}
+              <code className="sutr-code--inline">sutr connect &lt;agent&gt;</code> configures an
+              agent and ends by offering the optional Sutr Skills install,{' '}
+              <code className="sutr-code--inline">npx skills add sutr-dev/sutr-skills</code>.
             </p>
           </SutrCardBody>
         </SutrCard>

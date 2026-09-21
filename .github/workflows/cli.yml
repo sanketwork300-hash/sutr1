@@ -26,11 +26,5 @@ jobs:
       - run: pnpm exec tsc --noEmit
       - run: pnpm run build
       - name: Test
-        # The CLI has no test suite yet; `--passWithNoTests` would hide that,
-        # so the step says so instead.
-        run: |
-          if pnpm run --if-present test; then
-            echo "cli tests ran"
-          else
-            echo "::warning::The CLI has no test suite. tsc + build are the only gates."
-          fi
+        # Runs after the build: the end-to-end cases drive dist/index.js.
+        run: pnpm run test

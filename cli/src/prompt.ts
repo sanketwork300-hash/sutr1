@@ -48,3 +48,22 @@ export async function promptSecret(question: string): Promise<string> {
     });
   });
 }
+
+/**
+ * Ask a yes/no question on stderr. Anything other than an explicit yes is a
+ * no, so an accidental return key never modifies a file.
+ */
+export async function promptConfirm(question: string): Promise<boolean> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stderr,
+    terminal: true,
+  });
+
+  return await new Promise<boolean>((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(/^y(es)?$/i.test(answer.trim()));
+    });
+  });
+}

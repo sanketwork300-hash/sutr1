@@ -88,6 +88,22 @@ https://app.sutr.sh/mcp
 
 And they can also use our CLI, installable with `npm install -g sutr-cli` .
 
+The fastest way to wire an agent up is the CLI's `connect` command, which checks your
+configuration, authenticates, probes the MCP endpoint, lists the tools it can reach, and writes
+the MCP entry into the agent's own config file:
+
+```bash
+sutr auth login --api-key ap_...
+sutr connect claude-code     # or claude-desktop, cursor, vscode, codex
+sutr connect --list          # everything it can configure
+```
+
+It shows the change before applying it, backs up the file it touches, and works the same in a
+script: `--yes` to skip the prompt, `--dry-run` to preview, `--no-animation` and `NO_COLOR` for
+plain output, `-o json` for a machine-readable result. See the
+[CLI docs](https://docs.sutr.sh/connect/cli#connecting-an-agent) for the full flag list and the
+failure modes.
+
 You should also definitely be using the [Sutr skills](https://github.com/sutr-dev/sutr-skills) in order for agents to use Sutr most effectively:
 
 ```bash

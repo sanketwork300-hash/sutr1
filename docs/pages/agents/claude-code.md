@@ -28,6 +28,13 @@ Run the following command to connect to the Sutr MCP server:
 claude mcp add sutr -s user --transport http https://app.sutr.sh/mcp
 ```
 
+Or, if you have the [Sutr CLI](/connect/cli) installed and authenticated, let it verify the
+connection and write `./.mcp.json` for you:
+
+```bash
+sutr connect claude-code
+```
+
 
 ## Step 2: Install the Sutr skills
 

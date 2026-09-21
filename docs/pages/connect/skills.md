@@ -19,6 +19,10 @@ The source repo is on GitHub: [sutr-dev/sutr-skills](https://github.com/sutr-dev
 npx skills add sutr-dev/sutr-skills
 ```
 
+`sutr connect` prints this command as the last step of a successful connection, but never runs
+it: the skills are a separate repository, installed by you, and Sutr is fully functional without
+them.
+
 The same command works in any project. The installer detects which agent is running and writes the skills into the right plugin directory:
 
 | Agent | Plugin layout |
