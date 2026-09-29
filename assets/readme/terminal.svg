@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="470" viewBox="0 0 900 470" role="img" aria-label="Terminal demo: installing the Sutr CLI and connecting Claude Code">
+<rect width="900" height="470" rx="14" fill="#0d1117"/><rect x=".5" y=".5" width="899" height="469" rx="14" fill="none" stroke="#30363d"/>
+<path d="M0 14a14 14 0 0 1 14-14h872a14 14 0 0 1 14 14v26H0z" fill="#161b22"/>
+<circle cx="24" cy="20" r="6" fill="#ff5f57"/><circle cx="44" cy="20" r="6" fill="#febc2e"/><circle cx="64" cy="20" r="6" fill="#28c840"/>
+<text x="450.0" y="25" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" fill="#8b949e">sutr — bash</text>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0.0000;0.0286;0.0293;0.9571;1.0000" dur="14.0s" repeatCount="indefinite"/>
+<text x="24" y="70" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#7ee787">❯</text>
+<clipPath id="c0"><rect x="44" y="52" height="26" width="0"><animate attributeName="width" values="0;0;221.6;221.6" keyTimes="0.0000;0.0286;0.1143;1.0000" dur="14.0s" repeatCount="indefinite"/></rect></clipPath>
+<text x="46" y="70" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#e6edf3" clip-path="url(#c0)">npm install -g sutr-cli</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0.0000;0.1357;0.1364;0.9571;1.0000" dur="14.0s" repeatCount="indefinite"/>
+<text x="46" y="99" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#6e7681">added 1 package in 2s</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0.0000;0.1786;0.1793;0.9571;1.0000" dur="14.0s" repeatCount="indefinite"/>
+<text x="24" y="128" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#7ee787">❯</text>
+<clipPath id="c2"><rect x="44" y="110" height="26" width="0"><animate attributeName="width" values="0;0;414.79999999999995;414.79999999999995" keyTimes="0.0000;0.1786;0.2929;1.0000" dur="14.0s" repeatCount="indefinite"/></rect></clipPath>
+<text x="46" y="128" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#e6edf3" clip-path="url(#c2)">sutr auth login --api-key ap_live_••••••••••</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0.0000;0.3143;0.3150;0.9571;1.0000" dur="14.0s" repeatCount="indefinite"/>
+<text x="46" y="157" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#3fb950">✔</text><text x="70" y="157" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#c9d1d9" xml:space="preserve">Logged in to https://app.sutr.sh</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0.0000;0.3571;0.3579;0.9571;1.0000" dur="14.0s" repeatCount="indefinite"/>
+<text x="24" y="186" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#7ee787">❯</text>
+<clipPath id="c4"><rect x="44" y="168" height="26" width="0"><animate attributeName="width" values="0;0;230.79999999999998;230.79999999999998" keyTimes="0.0000;0.3571;0.4357;1.0000" dur="14.0s" repeatCount="indefinite"/></rect></clipPath>
+<text x="46" y="186" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#e6edf3" clip-path="url(#c4)">sutr connect claude-code</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0.0000;0.4571;0.4579;0.9571;1.0000" dur="14.0s" repeatCount="indefinite"/>
+<text x="46" y="215" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#a5b4fc">Connecting your agent to Sutr...</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0.0000;0.4929;0.4936;0.9571;1.0000" dur="14.0s" repeatCount="indefinite"/>
+<text x="46" y="244" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#3fb950">✔</text><text x="70" y="244" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#c9d1d9" xml:space="preserve">Checking configuration</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0.0000;0.5214;0.5221;0.9571;1.0000" dur="14.0s" repeatCount="indefinite"/>
+<text x="46" y="273" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#3fb950">✔</text><text x="70" y="273" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#c9d1d9" xml:space="preserve">Authenticating session</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0.0000;0.5500;0.5507;0.9571;1.0000" dur="14.0s" repeatCount="indefinite"/>
+<text x="46" y="302" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#3fb950">✔</text><text x="70" y="302" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#c9d1d9" xml:space="preserve">Verifying the MCP endpoint</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0.0000;0.5786;0.5793;0.9571;1.0000" dur="14.0s" repeatCount="indefinite"/>
+<text x="46" y="331" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#3fb950">✔</text><text x="70" y="331" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#c9d1d9" xml:space="preserve">Loading available tools          38 tools</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0.0000;0.6071;0.6079;0.9571;1.0000" dur="14.0s" repeatCount="indefinite"/>
+<text x="46" y="360" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#3fb950">✔</text><text x="70" y="360" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#c9d1d9" xml:space="preserve">Reading access policies          6 need approval</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0.0000;0.6357;0.6364;0.9571;1.0000" dur="14.0s" repeatCount="indefinite"/>
+<text x="46" y="389" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#3fb950">✔</text><text x="70" y="389" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" fill="#c9d1d9" xml:space="preserve">Writing agent configuration      .mcp.json</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0.0000;0.6857;0.6864;0.9571;1.0000" dur="14.0s" repeatCount="indefinite"/>
+<text x="46" y="424" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15" font-weight="700" fill="#5ee0c6">★ Sutr is ready. Restart Claude Code (or run /mcp) to pick up the server.</text>
+</g>
+<rect x="46" y="445" width="9" height="18" fill="#e6edf3"><animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite"/></rect>
+</svg>

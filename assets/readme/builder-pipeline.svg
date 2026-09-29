@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="230" viewBox="0 0 1200 230" role="img" aria-label="MCP builder pipeline: Source, Normalize, Select tools, Auth, Build, Deploy">
+<defs><linearGradient id="bar" x1="0" x2="1"><stop offset="0" stop-color="#7c9cff"/><stop offset="1" stop-color="#5ee0c6"/></linearGradient></defs>
+<rect width="1200" height="230" rx="18" fill="#0b1020"/>
+<text x="40" y="42" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="15" font-weight="700" fill="#7f8ab8" letter-spacing="2">OPENAPI SPEC  →  GOVERNED MCP SERVER</text>
+<rect x="100" y="115" width="1000" height="4" rx="2" fill="#1f2747"/>
+<rect x="100" y="115" width="0" height="4" rx="2" fill="url(#bar)"><animate attributeName="width" values="0;1000;1000;0" keyTimes="0;.72;.95;1" dur="9.0s" repeatCount="indefinite"/></rect>
+<circle cx="100" cy="117" r="28" fill="#141a33" stroke="#2c355f" stroke-width="2"/>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0;.03;.95;1" dur="9.0s" repeatCount="indefinite"/><circle cx="100" cy="117" r="28" fill="#1d2550" stroke="url(#bar)" stroke-width="2.5"/><circle cx="100" cy="117" r="28" fill="none" stroke="#5ee0c6"><animate attributeName="r" values="28;44" dur="1.3s" repeatCount="indefinite"/><animate attributeName="stroke-opacity" values=".7;0" dur="1.3s" repeatCount="indefinite"/></circle></g>
+<text x="100" y="125" text-anchor="middle" font-size="22">📥</text>
+<text x="100" y="172" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="16" font-weight="700" fill="#e6e9f7">Source</text>
+<text x="100" y="193" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#8f99c4">GitHub · URL · file</text>
+<text x="100" y="210" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#8f99c4">SwaggerHub · Postman</text>
+<circle cx="300" cy="117" r="28" fill="#141a33" stroke="#2c355f" stroke-width="2"/>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.1434;0.1744;.95;1" dur="9.0s" repeatCount="indefinite"/><circle cx="300" cy="117" r="28" fill="#1d2550" stroke="url(#bar)" stroke-width="2.5"/><circle cx="300" cy="117" r="28" fill="none" stroke="#5ee0c6"><animate attributeName="r" values="28;44" dur="1.3s" repeatCount="indefinite"/><animate attributeName="stroke-opacity" values=".7;0" dur="1.3s" repeatCount="indefinite"/></circle></g>
+<text x="300" y="125" text-anchor="middle" font-size="22">🧬</text>
+<text x="300" y="172" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="16" font-weight="700" fill="#e6e9f7">Normalize</text>
+<text x="300" y="193" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#8f99c4">validate · resolve $ref</text>
+<text x="300" y="210" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#8f99c4">canonical IR</text>
+<circle cx="500" cy="117" r="28" fill="#141a33" stroke="#2c355f" stroke-width="2"/>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.2879;0.3189;.95;1" dur="9.0s" repeatCount="indefinite"/><circle cx="500" cy="117" r="28" fill="#1d2550" stroke="url(#bar)" stroke-width="2.5"/><circle cx="500" cy="117" r="28" fill="none" stroke="#5ee0c6"><animate attributeName="r" values="28;44" dur="1.3s" repeatCount="indefinite"/><animate attributeName="stroke-opacity" values=".7;0" dur="1.3s" repeatCount="indefinite"/></circle></g>
+<text x="500" y="125" text-anchor="middle" font-size="22">🧰</text>
+<text x="500" y="172" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="16" font-weight="700" fill="#e6e9f7">Select tools</text>
+<text x="500" y="193" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#8f99c4">pick operations</text>
+<text x="500" y="210" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#8f99c4">name &amp; describe</text>
+<circle cx="700" cy="117" r="28" fill="#141a33" stroke="#2c355f" stroke-width="2"/>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.4323;0.4633;.95;1" dur="9.0s" repeatCount="indefinite"/><circle cx="700" cy="117" r="28" fill="#1d2550" stroke="url(#bar)" stroke-width="2.5"/><circle cx="700" cy="117" r="28" fill="none" stroke="#5ee0c6"><animate attributeName="r" values="28;44" dur="1.3s" repeatCount="indefinite"/><animate attributeName="stroke-opacity" values=".7;0" dur="1.3s" repeatCount="indefinite"/></circle></g>
+<text x="700" y="125" text-anchor="middle" font-size="22">🔑</text>
+<text x="700" y="172" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="16" font-weight="700" fill="#e6e9f7">Auth</text>
+<text x="700" y="193" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#8f99c4">API key · bearer</text>
+<text x="700" y="210" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#8f99c4">OAuth · none</text>
+<circle cx="900" cy="117" r="28" fill="#141a33" stroke="#2c355f" stroke-width="2"/>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.5768;0.6078;.95;1" dur="9.0s" repeatCount="indefinite"/><circle cx="900" cy="117" r="28" fill="#1d2550" stroke="url(#bar)" stroke-width="2.5"/><circle cx="900" cy="117" r="28" fill="none" stroke="#5ee0c6"><animate attributeName="r" values="28;44" dur="1.3s" repeatCount="indefinite"/><animate attributeName="stroke-opacity" values=".7;0" dur="1.3s" repeatCount="indefinite"/></circle></g>
+<text x="900" y="125" text-anchor="middle" font-size="22">📦</text>
+<text x="900" y="172" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="16" font-weight="700" fill="#e6e9f7">Build</text>
+<text x="900" y="193" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#8f99c4">deterministic · signed</text>
+<text x="900" y="210" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#8f99c4">validated artifact</text>
+<circle cx="1100" cy="117" r="28" fill="#141a33" stroke="#2c355f" stroke-width="2"/>
+<g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.7212;0.7522;.95;1" dur="9.0s" repeatCount="indefinite"/><circle cx="1100" cy="117" r="28" fill="#1d2550" stroke="url(#bar)" stroke-width="2.5"/><circle cx="1100" cy="117" r="28" fill="none" stroke="#5ee0c6"><animate attributeName="r" values="28;44" dur="1.3s" repeatCount="indefinite"/><animate attributeName="stroke-opacity" values=".7;0" dur="1.3s" repeatCount="indefinite"/></circle></g>
+<text x="1100" y="125" text-anchor="middle" font-size="22">🚀</text>
+<text x="1100" y="172" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="16" font-weight="700" fill="#e6e9f7">Deploy</text>
+<text x="1100" y="193" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#8f99c4">Docker · Cloud Run</text>
+<text x="1100" y="210" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#8f99c4">Azure · AWS</text>
+</svg>
