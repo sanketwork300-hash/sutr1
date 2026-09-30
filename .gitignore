@@ -157,3 +157,9 @@ __pycache__/
 # The UI bundle copied into the server image so one process can serve both.
 # Produced by `pnpm build` + the Dockerfile; never a source of truth.
 server/ui_dist/
+
+# Local agent instructions and build notes (kept on disk, not published)
+/CLAUDE.md
+/AGENTS.md
+/SUTR_BUILD_PROMPT.md
+/SUTR_PHASE0_AUDIT.md
