@@ -9,6 +9,7 @@ Two properties matter more than the state machine:
    them takes a healthy provider out of service for everybody.
 """
 
+import contextlib
 import time
 
 import httpx
@@ -220,10 +221,8 @@ def test_the_refusal_is_fast():
     _fail(3)
     started = time.perf_counter()
     for _ in range(1000):
-        try:
+        with contextlib.suppress(breaker.ProviderUnavailableError):
             breaker.allow(PROVIDER)
-        except breaker.ProviderUnavailableError:
-            pass
     elapsed = time.perf_counter() - started
     assert elapsed < 0.5, f"1000 refusals took {elapsed:.3f}s"
 

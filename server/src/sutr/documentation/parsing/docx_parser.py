@@ -27,6 +27,40 @@ from sutr.documentation.parsing.base import (
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 _DOCUMENT_PART = "word/document.xml"
 
+# The upload limit applies to the compressed file. A ZIP member says how big it
+# will be once inflated, and deflate reaches about 1000:1 on repetitive input,
+# so a 25 MiB upload can expand to tens of gigabytes in `archive.read` and
+# then again in the XML parser. Both bounds are checked from the directory
+# entry before a byte is inflated. 64 MiB of document XML is far beyond any
+# real document; 200:1 is far beyond any real document's compression.
+MAX_PART_BYTES = 64 * 1024 * 1024
+MAX_COMPRESSION_RATIO = 200
+
+
+def _read_part(archive: zipfile.ZipFile, name: str) -> bytes:
+    """Read one member, refusing one that would inflate past the caps."""
+    try:
+        info = archive.getinfo(name)
+    except KeyError:
+        raise ParseError("not_a_docx", f"This ZIP has no {name}.")
+    if info.file_size > MAX_PART_BYTES:
+        raise ParseError(
+            "docx_too_large",
+            f"{name} would be {info.file_size} bytes once unpacked, above the "
+            f"{MAX_PART_BYTES}-byte limit for a document part.",
+        )
+    if info.file_size > max(info.compress_size, 1) * MAX_COMPRESSION_RATIO:
+        raise ParseError(
+            "docx_suspicious_compression",
+            f"{name} compresses more than {MAX_COMPRESSION_RATIO}:1, which no real "
+            "document does. The file was refused rather than unpacked.",
+        )
+    data = archive.read(name)
+    if len(data) > MAX_PART_BYTES:
+        # The directory entry lied. Trust the bytes, not the header.
+        raise ParseError("docx_too_large", f"{name} unpacked past the {MAX_PART_BYTES}-byte limit.")
+    return data
+
 
 def _paragraph_text(paragraph) -> str:
     """A paragraph's visible text, from its runs.
@@ -80,7 +114,7 @@ def parse_docx(data: bytes) -> ParseResult:
             "(the older binary format) must be converted to .docx first.",
         )
     try:
-        root = ElementTree.fromstring(archive.read(_DOCUMENT_PART))
+        root = ElementTree.fromstring(_read_part(archive, _DOCUMENT_PART))
     except ElementTree.ParseError as exc:
         raise ParseError("docx_parse_error", f"The document body could not be read: {exc}")
 

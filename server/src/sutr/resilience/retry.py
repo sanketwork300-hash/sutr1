@@ -79,19 +79,18 @@ async def with_retries(call, *, method: str, attempts: int | None = None):
     Returns whatever `call` returns. Re-raises the last error when every
     attempt fails, so the caller sees the real failure rather than a wrapper.
     """
-    limit = attempts if attempts is not None else settings.provider_retry_attempts
-    last_error: BaseException | None = None
+    limit = max(1, attempts if attempts is not None else settings.provider_retry_attempts)
 
-    for attempt in range(max(1, limit)):
+    for attempt in range(limit - 1):
         try:
             return await call()
         except Exception as error:  # noqa: PERF203 - the retry is the point
-            last_error = error
-            if attempt == limit - 1 or not is_retryable(error, method):
+            if not is_retryable(error, method):
                 raise
             await asyncio.sleep(backoff_seconds(attempt))
 
-    raise last_error  # pragma: no cover - unreachable; the loop always returns or raises
+    # The last attempt: whatever it raises is the caller's answer.
+    return await call()
 
 
 def describe() -> dict:

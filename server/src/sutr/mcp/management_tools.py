@@ -14,6 +14,7 @@ from mcp import types
 from sqlmodel import Session, select
 
 from sutr.auth_start import start_oauth_for_installed
+from sutr.authz import ensure_agent_can
 from sutr.billing.limits import enforce_integration_limit
 from sutr.db import engine
 from sutr.integrations import registry as integration_registry
@@ -839,9 +840,35 @@ async def _wait_for_cache(org_id, integration_id: str, already_updating: bool) -
                 return
 
 
+# Tools that change the org's integration set. They are gated exactly like
+# their REST equivalents (api/installed.py): a viewer or member session can
+# browse and describe, but must not install, uninstall, or re-authorize.
+_INTEGRATION_MANAGEMENT_TOOLS = frozenset(
+    {
+        "sutr__install_integration",
+        "sutr__uninstall_integration",
+        "sutr__start_oauth_flow",
+    }
+)
+
+
+def _permission_error(exc: HTTPException) -> list[types.TextContent]:
+    detail = exc.detail
+    if isinstance(detail, dict):
+        return _text({"error": detail.get("error", "permission_denied"), **detail})
+    return _text({"error": "permission_denied", "message": str(detail)})
+
+
 async def dispatch(name: str, arguments: dict, auth) -> list[types.TextContent]:
     """Route a management tool call to its handler. auth is the AgentAuth dataclass."""
     org_id = auth.org.id
+
+    if name in _INTEGRATION_MANAGEMENT_TOOLS:
+        with Session(engine) as db:
+            try:
+                ensure_agent_can(db, auth, "integrations:manage")
+            except HTTPException as exc:
+                return _permission_error(exc)
 
     handlers = {
         "sutr__list_available_integrations": lambda: _handle_list_available(arguments, org_id),

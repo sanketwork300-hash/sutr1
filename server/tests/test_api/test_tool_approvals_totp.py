@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import datetime, timedelta
 
 import pyotp
@@ -35,6 +36,17 @@ def _enable_totp(test_user, session) -> str:
     session.add(test_user)
     session.commit()
     return secret
+
+
+def _two_codes(secret: str) -> tuple[str, str]:
+    """Codes for the current and the next 30s step.
+
+    A time step is single-use once it has authenticated the user, so a test
+    that needs two accepted codes must present two different steps; the next
+    one is still inside the server's drift window."""
+    base = int(time.time())
+    totp = pyotp.TOTP(secret)
+    return totp.at(base), totp.at(base + 30)
 
 
 @pytest.mark.anyio
@@ -121,6 +133,7 @@ async def test_approve_when_totp_disabled_does_not_require_code(
 @pytest.mark.anyio
 async def test_allow_tool_and_deny_gated_on_totp(client, session, test_user, test_org):
     secret = _enable_totp(test_user, session)
+    first_code, second_code = _two_codes(secret)
 
     r1 = _make_pending(session, test_org)
     resp = await client.post(
@@ -130,7 +143,7 @@ async def test_allow_tool_and_deny_gated_on_totp(client, session, test_user, tes
     assert resp.status_code == 403
     resp = await client.post(
         f"/api/tool-approvals/requests/{r1.id}/allow-tool",
-        json={"totp_code": pyotp.TOTP(secret).now()},
+        json={"totp_code": first_code},
     )
     assert resp.status_code == 200
 
@@ -142,6 +155,6 @@ async def test_allow_tool_and_deny_gated_on_totp(client, session, test_user, tes
     assert resp.status_code == 403
     resp = await client.post(
         f"/api/tool-approvals/requests/{r2.id}/deny",
-        json={"totp_code": pyotp.TOTP(secret).now()},
+        json={"totp_code": second_code},
     )
     assert resp.status_code == 200

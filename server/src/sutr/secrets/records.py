@@ -1,14 +1,21 @@
+import logging
 from datetime import datetime
 from typing import TypeVar
 from uuid import UUID
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from sutr.config import settings
 from sutr.models.secret import Secret
 from sutr.secrets import secrets_backend
 
+logger = logging.getLogger(__name__)
+
 TSecretOwner = TypeVar("TSecretOwner")
+
+# The backend that wrote plaintext. Rows labelled with it are what the
+# re-encryption sweep looks for.
+LEGACY_PLAINTEXT_BACKEND = "db"
 
 
 def upsert_secret(
@@ -64,3 +71,47 @@ def delete_secret(session: Session, secret_id: UUID | None) -> None:
     secrets_backend.delete(secret)
     session.delete(secret)
     session.flush()
+
+
+def reencrypt_legacy_secrets(session: Session, *, batch_size: int = 200) -> int:
+    """Re-store every row the plaintext `db` backend wrote through the active backend.
+
+    One-time upgrade work, written so it can run on every start: it selects
+    only rows still labelled `db`, so a second pass finds nothing and costs
+    one query. Each converted row is committed in batches; a crash midway
+    leaves the rest for the next pass rather than rolling everything back.
+
+    Returns the number of rows converted. A no-op when the active backend is
+    itself `db` (an operator who chose plaintext explicitly keeps it) and
+    when there is nothing to convert.
+    """
+    active = settings.secrets_backend
+    if active == LEGACY_PLAINTEXT_BACKEND:
+        return 0
+
+    converted = 0
+    while True:
+        rows = session.exec(
+            select(Secret)
+            .where(Secret.storage_backend == LEGACY_PLAINTEXT_BACKEND)
+            .where(Secret.value.is_not(None))  # type: ignore[union-attr]
+            .limit(batch_size)
+        ).all()
+        if not rows:
+            break
+        for secret in rows:
+            stored = secrets_backend.store(secret.ref, secret.value or "")
+            secret.value = stored.value
+            secret.encrypted_data_key = stored.encrypted_data_key
+            secret.kms_key_id = stored.kms_key_id
+            secret.storage_backend = active
+            secret.updated_at = datetime.utcnow()
+            session.add(secret)
+            converted += 1
+        session.commit()
+        if len(rows) < batch_size:
+            break
+
+    if converted:
+        logger.info("secrets: re-encrypted %d legacy plaintext row(s) via %s", converted, active)
+    return converted

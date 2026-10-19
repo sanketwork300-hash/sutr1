@@ -85,7 +85,9 @@ def http_provider_fixture(session, test_org):
 
 
 def _answer_with(monkeypatch, response_factory):
-    monkeypatch.setattr("sutr.api_client.validate_safe_url", lambda url, **kw: None)
+    monkeypatch.setattr(
+        "sutr.upstream_safety._resolve_host", lambda hostname, port: ("93.184.216.34",)
+    )
 
     class Patched(httpx.AsyncClient):
         def __init__(self, *args, **kwargs):

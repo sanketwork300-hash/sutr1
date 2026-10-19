@@ -98,14 +98,6 @@ def _looks_like_a_term(term: str) -> bool:
     return bool(re.match(r"^[\w][\w\s\-/']*$", term.strip()))
 
 
-# Three or more spaces in a row mean columns. `pdftotext` flattens a
-# two-column page into one line with the gap preserved, so `Bootstrap: one
-# authoritative source        differences are reconciled` is two cells that
-# were never a sentence. A single wide gap is the most reliable signal that a
-# line came from a layout rather than from prose.
-_COLUMN_GAP = re.compile(r"\S {3,}\S")
-
-
 def _citation(chunk, text: str) -> Citation:
     from sutr.documentation.chunking import locate
 

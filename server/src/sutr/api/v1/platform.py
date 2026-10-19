@@ -48,7 +48,7 @@ def capabilities() -> list[dict]:
         _capability(
             "secrets_kms",
             settings.secrets_backend == "db_kms",
-            "SECRETS_BACKEND is 'db', so secret values are stored unencrypted in the database.",
+            f"SECRETS_BACKEND is '{settings.secrets_backend}'; KMS envelope encryption is off.",
             "Envelope encryption for stored secrets.",
         ),
         _capability(

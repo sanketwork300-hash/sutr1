@@ -24,6 +24,8 @@ from sutr.mcp.refresh import refresh_one
 from sutr.models.custom_api_integration import CustomApiIntegration
 from sutr.models.integration import InstalledIntegration
 from sutr.models.tool_cache import ToolCache
+from sutr.observability.log_safety import single_line
+from sutr.resilience.breaker import ProviderUnavailableError
 from sutr.secrets.records import get_secret_value
 from sutr.token_auth import build_token_auth_headers, is_no_auth, validate_token_auth_config
 from sutr.upstream_safety import UnsafeUpstreamUrlError, validate_safe_url
@@ -216,6 +218,28 @@ def _redact(text: str, token: str) -> str:
     return text
 
 
+def _test_failure_message(exc: Exception) -> str:
+    """What the caller is told when a test request produced no response.
+
+    The exception's own text is not echoed: it can carry library internals,
+    the pinned address the host resolved to, or a fragment of the request.
+    A transport failure is described in terms the caller can act on, and the
+    detail goes to the server log instead.
+    """
+    if isinstance(exc, ProviderUnavailableError):
+        return (
+            "This host failed repeatedly and is not being called for now. "
+            f"Retry in about {int(exc.retry_after)}s."
+        )
+    if isinstance(exc, httpx.TimeoutException):
+        return "The API did not respond within the test timeout."
+    if isinstance(exc, httpx.ConnectError):
+        return "Could not connect to the API host."
+    if isinstance(exc, httpx.HTTPError):
+        return "The request to the API failed before a response arrived."
+    return "The request could not be completed."
+
+
 def _redact_result_token(result: dict, token: str) -> dict:
     if not token:
         return result
@@ -228,6 +252,14 @@ def _redact_result_token(result: dict, token: str) -> dict:
             content.append(item)
     redacted["content"] = content
     return redacted
+
+
+def _can_execute_tools(session: Session, agent_auth: AgentAuth) -> bool:
+    try:
+        ensure_agent_can(session, agent_auth, "tools:execute")
+    except HTTPException:
+        return False
+    return True
 
 
 def _audit_test_run(
@@ -398,6 +430,9 @@ async def test_custom_api(
     session: Session = Depends(get_session),
     agent_auth: AgentAuth = Depends(get_agent_auth),
 ) -> dict:
+    # Same gate as every other mutating endpoint here: the test sends an
+    # arbitrary request to an arbitrary host on the org's behalf.
+    ensure_agent_can(session, agent_auth, "integrations:manage")
     _validate_base_url(body.base_url)
     _validate_auth(body.token_header, body.token_format)
     tool = _validate_tool_definitions([body.tool])[0]
@@ -407,6 +442,10 @@ async def test_custom_api(
         not token
         and not is_no_auth(body.token_header, body.token_format)
         and body.integration_db_id
+        # The stored credential is only ever used by the tool pipeline, which
+        # requires tools:execute. A caller who may edit definitions but not
+        # run tools must not get a side door to the live secret.
+        and _can_execute_tools(session, agent_auth)
     ):
         row = _get_row(session, agent_auth.org.id, body.integration_db_id)
         # Only inject the stored token when the test is exercising the SAME
@@ -449,8 +488,14 @@ async def test_custom_api(
     except Exception as exc:
         error_class = exc.__class__.__name__
         duration_ms = int((time.perf_counter() - start) * 1000)
+        logger.warning(
+            "custom API test to %s failed (%s): %s",
+            single_line(target.hostname),
+            error_class,
+            single_line(_redact(str(exc), token)),
+        )
         result = {
-            "content": [{"type": "text", "text": f"API test failed: {_redact(str(exc), token)}"}],
+            "content": [{"type": "text", "text": f"API test failed: {_test_failure_message(exc)}"}],
             "isError": True,
             "status_code": None,
             "duration_ms": duration_ms,

@@ -4,13 +4,18 @@ This is completely independent from the Google integration OAuth flow. Its only
 job is to let a user authenticate into sutr using their Google account.
 
 Flow:
-    1. UI calls GET /api/auth/google/login → server stores a pending state row
-       and returns a Google authorization URL.
+    1. UI generates a random nonce, keeps it in sessionStorage, and calls
+       GET /api/auth/google/login?nonce=... → server stores a pending state
+       row (with the nonce) and returns a Google authorization URL.
     2. UI redirects the browser to Google.
     3. Google redirects to GET /api/auth/google/callback?code&state.
-    4. Server exchanges the code, reads userinfo, upserts a user, mints a JWT,
-       and redirects to `${ui_base_url}/login/google/callback#access_token=...`.
-       The UI page reads the hash fragment, stores the token, and continues.
+    4. Server exchanges the code, reads userinfo, upserts a user, and redirects
+       to `${ui_base_url}/login/google/callback#...&nonce=<nonce>`:
+         - `access_token=...` when the account has no second factor;
+         - `totp_challenge=...` when it has TOTP enabled. The UI then posts
+           the challenge plus a code to POST /api/auth/totp-challenge.
+       The UI page compares the echoed nonce with the one it stored and
+       discards any fragment that does not belong to a flow it started.
 """
 
 from __future__ import annotations
@@ -24,12 +29,12 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from sqlmodel import Session, func, select
 
 from sutr.analytics import posthog_client
-from sutr.auth_tokens import create_access_token
+from sutr.auth_tokens import create_access_token, create_totp_challenge_token
 from sutr.config import settings
 from sutr.db import get_session
 from sutr.email import normalize_email
@@ -39,6 +44,8 @@ from sutr.models.org import Org
 from sutr.models.org_membership import OrgMembership
 from sutr.models.user import User
 from sutr.models.waitlist import Waitlist
+from sutr.observability.log_safety import single_line
+from sutr.ui_redirect import ui_url
 
 logger = logging.getLogger(__name__)
 
@@ -88,18 +95,40 @@ def _sweep_expired(session: Session) -> None:
 
 
 def _ui_redirect_with_error(error_code: str) -> RedirectResponse:
-    url = f"{settings.ui_base_url.rstrip('/')}/login?google_error={quote(error_code)}"
-    return RedirectResponse(url=url, status_code=302)
-
-
-def _ui_redirect_with_token(token: str) -> RedirectResponse:
-    # Hash fragment keeps the token out of server logs / Referer headers while
-    # still being readable by the client-side callback page.
-    url = (
-        f"{settings.ui_base_url.rstrip('/')}/login/google/callback"
-        f"#access_token={quote(token)}&token_type=bearer"
+    return RedirectResponse(
+        url=ui_url("/login", query={"google_error": error_code}), status_code=302
     )
-    return RedirectResponse(url=url, status_code=302)
+
+
+def _provider_error_code(error: str | None) -> str:
+    """The code shown for a callback that carried no authorization code.
+
+    Google's `error` parameter arrives on a URL anyone can craft, so it is not
+    echoed into the redirect. The login page only distinguishes a user who
+    declined consent; every other provider error reads the same to them.
+    """
+    if not error:
+        return "missing_code"
+    return "access_denied" if error == "access_denied" else "login_failed"
+
+
+def _ui_callback_redirect(fragment: str, nonce: str | None) -> RedirectResponse:
+    # Hash fragment keeps the token out of server logs / Referer headers while
+    # still being readable by the client-side callback page. The nonce lets
+    # that page reject a fragment for a flow this browser never started.
+    if nonce:
+        fragment += f"&nonce={quote(nonce, safe='')}"
+    return RedirectResponse(
+        url=ui_url("/login/google/callback", fragment=fragment), status_code=302
+    )
+
+
+def _ui_redirect_with_token(token: str, nonce: str | None) -> RedirectResponse:
+    return _ui_callback_redirect(f"access_token={quote(token)}&token_type=bearer", nonce)
+
+
+def _ui_redirect_with_totp_challenge(challenge: str, nonce: str | None) -> RedirectResponse:
+    return _ui_callback_redirect(f"totp_challenge={quote(challenge)}", nonce)
 
 
 async def _exchange_code(code: str, code_verifier: str) -> dict:
@@ -209,7 +238,19 @@ def _find_or_create_user(session: Session, *, sub: str, email: str, email_verifi
 
 
 @router.get("/login")
-def start_google_login(session: Session = Depends(get_session)) -> dict:
+def start_google_login(
+    nonce: str = Query(
+        min_length=16,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._~-]+$",
+        description=(
+            "Random value the browser generated and kept for this flow; it is "
+            "echoed back in the callback fragment so the page can refuse a token "
+            "from a flow it did not start."
+        ),
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
     """Begin a Google sign-in flow. Returns the authorization URL."""
     _require_configured()
     _sweep_expired(session)
@@ -217,7 +258,7 @@ def start_google_login(session: Session = Depends(get_session)) -> dict:
     state = secrets.token_urlsafe(32)
     code_verifier, code_challenge = _pkce_pair()
 
-    session.add(GoogleLoginState(state=state, code_verifier=code_verifier))
+    session.add(GoogleLoginState(state=state, code_verifier=code_verifier, nonce=nonce))
     session.commit()
 
     params = {
@@ -250,12 +291,13 @@ async def google_login_callback(
 
     # One-time: delete the row regardless of outcome.
     code_verifier = pending.code_verifier
+    nonce = pending.nonce
     session.delete(pending)
     session.commit()
 
     if error or not code:
-        logger.info("Google login aborted: %s", error or "missing_code")
-        return _ui_redirect_with_error(error or "missing_code")
+        logger.info("Google login aborted: %s", single_line(error or "missing_code"))
+        return _ui_redirect_with_error(_provider_error_code(error))
 
     token_payload = await _exchange_code(code, code_verifier)
     access_token = token_payload.get("access_token")
@@ -275,7 +317,7 @@ async def google_login_callback(
         )
     except HTTPException as exc:
         session.rollback()
-        logger.info("Google login rejected: %s", exc.detail)
+        logger.info("Google login rejected: %s", single_line(exc.detail))
         if exc.status_code == 403 and exc.detail == "Email not on waitlist.":
             return _ui_redirect_with_error("not_on_waitlist")
         if exc.status_code == 403 and exc.detail == "email_not_verified_by_idp":
@@ -292,13 +334,20 @@ async def google_login_callback(
 
     session.commit()
 
+    if user.totp_enabled:
+        # Google vouched for the first factor only. TOTP is a real login
+        # factor (see user_auth.login), so hand the browser a short-lived
+        # challenge and let POST /api/auth/totp-challenge mint the session.
+        challenge = create_totp_challenge_token(str(user.id), token_version=user.token_version)
+        return _ui_redirect_with_totp_challenge(challenge, nonce)
+
     jwt_token = create_access_token(str(user.id), token_version=user.token_version)
     posthog_client.capture(
         distinct_id=str(user.id),
         event="user_logged_in",
         properties={"auth_method": "google"},
     )
-    return _ui_redirect_with_token(jwt_token)
+    return _ui_redirect_with_token(jwt_token, nonce)
 
 
 __all__ = ["router"]

@@ -10,7 +10,6 @@ Run from `server/`:
     uv run python ../qa/chaos/bus_outage.py
 """
 
-import asyncio
 import sys
 from pathlib import Path
 
@@ -18,9 +17,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "server" / "src"))
 
 from sqlmodel import Session, SQLModel, create_engine, select  # noqa: E402
 
-import sutr.main  # noqa: F401,E402  — imports every model
 from sutr.events import outbox, relay  # noqa: E402
-from sutr.models.outbox_event import PENDING, PUBLISHED, OutboxEvent  # noqa: E402
+from sutr.models.metadata import register_all_models  # noqa: E402
+from sutr.models.outbox_event import PENDING, OutboxEvent  # noqa: E402
 
 
 class BrokenBus:
@@ -37,6 +36,7 @@ class BrokenBus:
 
 
 def main() -> int:
+    register_all_models()
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
 

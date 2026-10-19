@@ -174,7 +174,7 @@ async def test_p1_dispatch_revalidates_the_full_url():
     def rebound(url, **kwargs):
         raise UnsafeUpstreamUrlError("resolves to a private address")
 
-    with patch("sutr.api_client.validate_safe_url", side_effect=rebound):
+    with patch("sutr.api_client.pinned_request_target", side_effect=rebound):
         with patch("httpx.AsyncClient.stream") as stream:
             result = await api_client.dispatch_api_tool(
                 base_url="https://rebound.example.com",

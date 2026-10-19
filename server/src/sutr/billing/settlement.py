@@ -2,9 +2,12 @@
 
 LLD §5.1 gives an example — *"₹100 → 80% provider / 20% platform"* — and build
 prompt §44 gives the rule that matters more: **the percentage must not be
-hard-coded.** So the split comes from configuration, can be overridden per run,
-and is **recorded on the settlement row**. An old settlement is then explained
-by the share that applied then, not by the share that applies now.
+hard-coded.** So the split comes from configuration and is **recorded on the
+settlement row**. An old settlement is then explained by the share that applied
+then, not by the share that applies now. The share is platform configuration:
+the provider being paid does not get to choose it, so the tenant-facing route
+never accepts one and `run`'s `provider_share_bps` parameter exists for the
+platform's own callers and for tests.
 
 §5.1's failure behaviour: *"Settlement fails — pause payout, preserve ledger,
 retry."* All three are here. `paused` is a state rather than an absence, the
@@ -28,8 +31,8 @@ from sqlmodel import Session, col, desc, select
 from sutr.billing import ledger
 from sutr.common.errors import ConflictError, InvalidRequestError
 from sutr.config import settings
-from sutr.models.invoice import STATE_ISSUED, STATE_PAID, Invoice, InvoiceLine
-from sutr.models.ledger_entry import CREDIT, DEBIT, KIND_SETTLEMENT
+from sutr.models.invoice import STATE_PAID, Invoice, InvoiceLine
+from sutr.models.ledger_entry import CREDIT, DEBIT, KIND_SETTLEMENT, LedgerEntry
 from sutr.models.settlement import (
     STATE_COMPLETE,
     STATE_PAUSED,
@@ -57,16 +60,18 @@ def default_share_bps() -> int:
 def _provider_totals(
     session: Session, *, provider_org_id: uuid.UUID, start: datetime, end: datetime
 ) -> tuple[int, list[uuid.UUID], str]:
-    """What this provider earned in the period, from issued invoices.
+    """What this provider earned in the period, from **paid** invoices.
 
-    Only issued or paid invoices count. A draft is a calculation, not an
-    obligation, and settling one would promise a provider money against an
-    invoice that might still be voided.
+    Only paid invoices count. A draft is a calculation, not an obligation, and
+    an issued-but-unpaid invoice is a promise the consumer has not kept yet:
+    settling it would credit the provider with money the platform never
+    received, and a consumer who then voids or simply never pays the invoice
+    has manufactured a payable out of nothing.
     """
     rows = session.exec(
         select(InvoiceLine, Invoice)
         .join(Invoice, col(InvoiceLine.invoice_id) == col(Invoice.id))
-        .where(col(Invoice.state).in_((STATE_ISSUED, STATE_PAID)))
+        .where(col(Invoice.state) == STATE_PAID)
         .where(col(Invoice.period_start) >= start)
         .where(col(Invoice.period_end) <= end)
     ).all()
@@ -108,10 +113,18 @@ def run(
     existing = for_period(
         session, provider_org_id=provider_org_id, start=period_start, end=period_end
     )
-    if existing is not None and existing.state == STATE_COMPLETE:
+    # The guard is on *overlap*, not on identical bounds. The totals below are
+    # summed over a range, so a second run whose period merely intersects an
+    # already-settled one would credit the shared invoices a second time.
+    clash = overlapping(
+        session, provider_org_id=provider_org_id, start=period_start, end=period_end
+    )
+    if clash is not None:
         raise ConflictError(
-            "This period is already settled. Running it again would double the provider's "
-            "payable; correct it with a compensating ledger entry instead."
+            f"This period overlaps settlement {clash.id} "
+            f"({clash.period_start:%Y-%m-%d}–{clash.period_end:%Y-%m-%d}), which is already "
+            "settled. Running it again would double the provider's payable; correct it with "
+            "a compensating ledger entry instead."
         )
 
     record = existing or Settlement(
@@ -217,12 +230,120 @@ def mark_paid_out(session: Session, record: Settlement, *, reference: str) -> Se
 def for_period(
     session: Session, *, provider_org_id: uuid.UUID, start: datetime, end: datetime
 ) -> Settlement | None:
+    """The settlement row with exactly these bounds, for resuming a paused run."""
     return session.exec(
         select(Settlement)
         .where(Settlement.provider_org_id == provider_org_id)
         .where(Settlement.period_start == start)
         .where(Settlement.period_end == end)
     ).first()
+
+
+def overlapping(
+    session: Session,
+    *,
+    provider_org_id: uuid.UUID,
+    start: datetime,
+    end: datetime,
+    states: tuple[str, ...] = (STATE_COMPLETE,),
+) -> Settlement | None:
+    """A settlement in `states` whose period intersects [start, end).
+
+    Two half-open periods intersect when each starts before the other ends.
+    This is the guard that stops an invoice from being settled twice; exact
+    bounds are what `for_period` is for.
+    """
+    return session.exec(
+        select(Settlement)
+        .where(Settlement.provider_org_id == provider_org_id)
+        .where(col(Settlement.state).in_(states))
+        .where(col(Settlement.period_start) < end)
+        .where(col(Settlement.period_end) > start)
+        .order_by(col(Settlement.period_start))
+    ).first()
+
+
+def including_invoice(session: Session, invoice_id: uuid.UUID) -> list[Settlement]:
+    """Complete settlements whose recorded invoice list names this invoice."""
+    candidates = session.exec(
+        select(Settlement)
+        .where(Settlement.state == STATE_COMPLETE)
+        .where(col(Settlement.invoice_ids_json).contains(str(invoice_id)))
+    ).all()
+    # `contains` is a substring match; confirm against the parsed list so a
+    # malformed column can never attach an invoice to the wrong settlement.
+    return [
+        record
+        for record in candidates
+        if str(invoice_id) in json.loads(record.invoice_ids_json or "[]")
+    ]
+
+
+def _invoice_gross_for_provider(
+    session: Session, *, invoice_id: uuid.UUID, provider_org_id: uuid.UUID
+) -> int:
+    from sutr.models.registry_tool import RegistryTool
+
+    lines = session.exec(select(InvoiceLine).where(InvoiceLine.invoice_id == invoice_id)).all()
+    gross = 0
+    for line in lines:
+        if line.tool_id is None:
+            continue
+        tool = session.get(RegistryTool, line.tool_id)
+        if tool is None or tool.org_id != provider_org_id:
+            continue
+        gross += line.total_micros
+    return gross
+
+
+def reverse_invoice_share(session: Session, invoice: Invoice, *, reason: str) -> list[LedgerEntry]:
+    """Take back the provider's share of an invoice that has since been voided.
+
+    A settlement is computed from invoices; an invoice that is voided after
+    settlement leaves the provider credited for revenue that no longer exists.
+    The settlement row is not edited — §5.1's corrections are compensating
+    entries — so this writes a `DEBIT` on the provider's payable for exactly
+    the share that invoice contributed, linked to both the settlement and the
+    invoice. Done once per settlement: a second void of the same invoice is
+    refused upstream, and a repeated call finds the compensation already there.
+    """
+    written: list[LedgerEntry] = []
+    for record in including_invoice(session, invoice.id):
+        already = session.exec(
+            select(LedgerEntry)
+            .where(LedgerEntry.settlement_id == record.id)
+            .where(LedgerEntry.invoice_id == invoice.id)
+            .where(LedgerEntry.direction == DEBIT)
+        ).first()
+        if already is not None:
+            continue
+        gross = _invoice_gross_for_provider(
+            session, invoice_id=invoice.id, provider_org_id=record.provider_org_id
+        )
+        share_micros = round(gross * record.provider_share_bps / BPS)
+        if not share_micros:
+            continue
+        written.append(
+            ledger.append(
+                session,
+                org_id=record.provider_org_id,
+                kind=KIND_SETTLEMENT,
+                amount_micros=share_micros,
+                currency=record.currency,
+                direction=DEBIT,
+                account=ledger.ACCOUNT_PAYABLE,
+                settlement_id=record.id,
+                invoice_id=invoice.id,
+                description=f"{invoice.number} voided after settlement: {reason}",
+                metadata={
+                    "compensates_settlement": str(record.id),
+                    "voided_invoice": str(invoice.id),
+                    "provider_share_bps": record.provider_share_bps,
+                    "invoice_gross_micros": gross,
+                },
+            )
+        )
+    return written
 
 
 def list_settlements(
@@ -272,7 +393,9 @@ def describe() -> dict[str, Any]:
     return {
         "default_provider_share_bps": default_share_bps(),
         "default_provider_share_percent": default_share_bps() / 100,
-        "configurable": "REVENUE_SHARE_PROVIDER_BPS, overridable per run",
+        "configurable": "REVENUE_SHARE_PROVIDER_BPS, platform configuration only",
+        "settable_per_request": False,
+        "settles": "paid invoices only",
         "hard_coded": False,
         "states": [STATE_PENDING, STATE_COMPLETE, STATE_PAUSED],
         "on_failure": "pause the payout, preserve the ledger, retry the same row",

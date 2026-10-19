@@ -17,6 +17,7 @@ from mcp.server.auth.provider import (
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from pydantic import AnyUrl
+from sqlalchemy import delete as sa_delete
 from sqlmodel import Session, select
 
 from sutr.config import settings
@@ -65,7 +66,9 @@ def _issue_access_token(
         "scope": " ".join(scopes),
         "token_use": "mcp_access",
         "aud": f"{settings.base_url}/mcp",
-        "exp": now + timedelta(minutes=settings.jwt_expire_minutes),
+        # Deliberately short: a 30-day refresh token is issued alongside, so the
+        # bearer that actually reaches /mcp does not need to outlive an hour.
+        "exp": now + timedelta(minutes=settings.mcp_access_token_expire_minutes),
         "iat": now,
         "jti": str(uuid.uuid4()),
         "tv": _current_token_version(user_id),
@@ -278,14 +281,20 @@ class SutrOAuthProvider:
         client: OAuthClientInformationFull,
         authorization_code: AppAuthorizationCode,
     ) -> OAuthToken:
-        # Delete the auth code so it's one-time use
+        # Single use, atomically: the DELETE is the claim on the code. Two
+        # concurrent exchanges both pass load_authorization_code, but only the
+        # one whose DELETE removes the row gets tokens; the other sees
+        # rowcount 0 and is refused before anything is minted.
         with Session(engine) as db:
-            row = db.exec(
-                select(OAuthAuthCode).where(OAuthAuthCode.code == authorization_code.code)
-            ).first()
-            if row:
-                db.delete(row)
-                db.commit()
+            result = db.execute(
+                sa_delete(OAuthAuthCode).where(OAuthAuthCode.code == authorization_code.code)  # type: ignore[arg-type]
+            )
+            db.commit()
+            if result.rowcount != 1:
+                raise TokenError(
+                    error="invalid_grant",
+                    error_description="Authorization code has already been used or is invalid",
+                )
 
         access_token = _issue_access_token(
             user_id=authorization_code.user_id,
@@ -303,7 +312,7 @@ class SutrOAuthProvider:
         return OAuthToken(
             access_token=access_token,
             token_type="Bearer",
-            expires_in=settings.jwt_expire_minutes * 60,
+            expires_in=settings.mcp_access_token_expire_minutes * 60,
             scope=" ".join(authorization_code.scopes) if authorization_code.scopes else None,
             refresh_token=refresh_token,
         )
@@ -457,7 +466,7 @@ class SutrOAuthProvider:
         return OAuthToken(
             access_token=access_token,
             token_type="Bearer",
-            expires_in=settings.jwt_expire_minutes * 60,
+            expires_in=settings.mcp_access_token_expire_minutes * 60,
             scope=" ".join(effective_scopes) if effective_scopes else None,
             refresh_token=new_refresh_token,
         )

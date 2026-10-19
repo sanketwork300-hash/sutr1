@@ -4,13 +4,21 @@ import logging
 import uuid
 
 import jwt
+from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
+from mcp.server.auth.provider import AccessToken
 from sqlmodel import Session, select
 
 from sutr.config import settings
 from sutr.db import engine
 from sutr.dependencies import AgentAuth, default_membership
-from sutr.mcp.server import RequestMeta, _current_auth, _current_request_meta, session_manager
-from sutr.models.api_key import ApiKey
+from sutr.mcp.server import (
+    RequestMeta,
+    _current_auth,
+    _current_request_meta,
+    _session_auth,
+    session_manager,
+)
+from sutr.models.api_key import ApiKey, hash_api_key
 from sutr.models.oauth_revoked_token import OAuthRevokedToken
 from sutr.models.org import Org
 from sutr.models.org_membership import OrgMembership
@@ -150,7 +158,7 @@ def _authenticate(scope: dict) -> AgentAuth | None:  # noqa: C901
     # 2. Try API key
     raw_key = _extract_header(scope, b"x-api-key")
     if raw_key:
-        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+        key_hash = hash_api_key(raw_key)
         with Session(engine) as session:
             api_key = session.exec(
                 select(ApiKey).where(ApiKey.key_hash == key_hash).where(ApiKey.is_active == True)  # noqa: E712
@@ -193,26 +201,143 @@ async def _send_401(send):
     await send({"type": "http.response.body", "body": body})
 
 
+MCP_SESSION_ID_HEADER = b"mcp-session-id"
+
+# session id -> principal key of the credential that opened the session.
+#
+# A StreamableHTTP session is a long-lived server task; the SDK only checks
+# that later requests come from the session's creator when `scope["user"]` is
+# an `AuthenticatedUser`, which `mcp_asgi_app` now populates. This table is the
+# gateway's own copy of that binding, so the property does not hinge on an
+# SDK internal: a session may only be driven by the principal that opened it,
+# which makes a leaked or guessed session id worthless to anyone else and
+# stops a revoked credential being kept alive through a different one.
+_session_principals: dict[str, str] = {}
+
+
+def principal_key(auth: AgentAuth) -> str:
+    """Stable, distinct identity for session binding.
+
+    An API key is its own principal (two keys of one org must not share
+    sessions, and revoking one must not leave the other's sessions usable);
+    a user token is the user *in* the org the token resolved to.
+    """
+    if auth.api_key is not None:
+        return f"api_key:{auth.api_key.id}"
+    return f"user:{auth.user.id}:org:{auth.org.id}"
+
+
+def _authenticated_user(key: str) -> AuthenticatedUser:
+    """What the SDK's `_session_owners` check compares across requests.
+
+    `authorization_context()` reduces this to (client_id, issuer, subject);
+    all three are populated so the comparison is never degraded to `None`.
+    """
+    return AuthenticatedUser(
+        AccessToken(
+            token="",
+            client_id=key,
+            scopes=[],
+            subject=key,
+            claims={"iss": settings.base_url},
+        )
+    )
+
+
+async def _send_session_not_found(send) -> None:
+    """Same answer the SDK gives for an unknown session, so a caller cannot
+    tell "no such session" from "not your session"."""
+    body = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": "server-error",
+            "error": {"code": -32600, "message": "Session not found"},
+        }
+    ).encode()
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 404,
+            "headers": [
+                [b"content-type", b"application/json"],
+                [b"content-length", str(len(body)).encode()],
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
+def _prune_dead_sessions() -> None:
+    """Drop bindings for sessions the SDK has already reaped or terminated."""
+    live = getattr(session_manager, "_server_instances", None)
+    if live is None:
+        return
+    for session_id in [sid for sid in _session_principals if sid not in live]:
+        _session_principals.pop(session_id, None)
+        _session_auth.pop(session_id, None)
+
+
+def _bind_new_session(send, key: str, auth: AgentAuth):
+    """Wrap `send` so the session id the SDK assigns in the response is bound
+    to the principal that made the creating request."""
+
+    async def send_wrapper(message) -> None:
+        if message["type"] == "http.response.start":
+            for header_name, header_value in message.get("headers", []):
+                if header_name.lower() == MCP_SESSION_ID_HEADER:
+                    session_id = header_value.decode("utf-8")
+                    _session_principals[session_id] = key
+                    _session_auth[session_id] = auth
+                    break
+        await send(message)
+
+    return send_wrapper
+
+
 async def mcp_asgi_app(scope, receive, send):
     """Auth-aware ASGI app that wraps the MCP session manager."""
-    if scope["type"] == "http":
-        auth = _authenticate(scope)
-        if auth is None:
-            await _send_401(send)
-            return
-
-        client = scope.get("client")
-        meta = RequestMeta(
-            ip=client[0] if client else None,
-            user_agent=_extract_header(scope, b"user-agent"),
-        )
-        auth_token = _current_auth.set(auth)
-        meta_token = _current_request_meta.set(meta)
-        try:
-            await session_manager.handle_request(scope, receive, send)
-        finally:
-            _current_auth.reset(auth_token)
-            _current_request_meta.reset(meta_token)
-    else:
+    if scope["type"] != "http":
         # Non-HTTP scopes (lifespan, etc.) pass through
         await session_manager.handle_request(scope, receive, send)
+        return
+
+    auth = _authenticate(scope)
+    if auth is None:
+        await _send_401(send)
+        return
+
+    key = principal_key(auth)
+    # Activates the SDK's own session-owner check (StreamableHTTPSessionManager
+    # compares authorization_context(scope["user"]) with the session's creator).
+    scope["user"] = _authenticated_user(key)
+
+    session_id = _extract_header(scope, MCP_SESSION_ID_HEADER)
+    if session_id is not None:
+        owner = _session_principals.get(session_id)
+        if owner is not None:
+            if owner != key:
+                logger.warning(
+                    "MCP: refusing session %s: presented credential is not the one that created it",
+                    session_id[:16],
+                )
+                await _send_session_not_found(send)
+                return
+            # Handlers on this session read the credential presented *now*,
+            # not the one captured when the session was created.
+            _session_auth[session_id] = auth
+    else:
+        _prune_dead_sessions()
+        send = _bind_new_session(send, key, auth)
+
+    client = scope.get("client")
+    meta = RequestMeta(
+        ip=client[0] if client else None,
+        user_agent=_extract_header(scope, b"user-agent"),
+    )
+    auth_token = _current_auth.set(auth)
+    meta_token = _current_request_meta.set(meta)
+    try:
+        await session_manager.handle_request(scope, receive, send)
+    finally:
+        _current_auth.reset(auth_token)
+        _current_request_meta.reset(meta_token)

@@ -8,6 +8,7 @@ import uuid
 
 from sqlmodel import select
 
+from sutr.config import settings
 from sutr.models.audit_event import AuditEvent
 from sutr.models.org import Org
 from sutr.models.org_membership import OrgMembership
@@ -273,16 +274,28 @@ async def test_a_settlement_reports_the_share_that_applied(client):
     assert data["paid_out_by_this_platform"] is False
 
 
-async def test_the_share_can_be_overridden_per_run(client):
-    response = await client.post("/v1/settlements/run", json={**PERIOD, "provider_share_bps": 6000})
-    assert response.json()["data"]["provider_share_bps"] == 6000
+async def test_the_payee_cannot_name_their_own_share(client, monkeypatch):
+    """S8: the caller is the provider being paid. A payee who could send a
+    percentage could send 100%, so the request has no such field and one that
+    arrives anyway is refused rather than quietly ignored."""
+    for bps in (10_000, 6000, 0):
+        response = await client.post(
+            "/v1/settlements/run", json={**PERIOD, "provider_share_bps": bps}
+        )
+        assert response.status_code == 422, response.text
+    assert (await client.get("/v1/settlements")).json()["data"]["settlements"] == []
+
+    # The share that applies is the platform's configuration, read at run time.
+    monkeypatch.setattr(settings, "revenue_share_provider_bps", 7000)
+    response = await client.post("/v1/settlements/run", json=PERIOD)
+    assert response.status_code == 201, response.text
+    assert response.json()["data"]["provider_share_bps"] == 7000
 
 
-async def test_an_impossible_share_is_refused(client):
-    response = await client.post(
-        "/v1/settlements/run", json={**PERIOD, "provider_share_bps": 12_000}
-    )
-    assert response.status_code == 422
+async def test_the_capabilities_say_the_share_is_not_settable(client):
+    data = (await client.get("/v1/metering/capabilities")).json()["data"]
+    assert data["settlement"]["settable_per_request"] is False
+    assert data["settlement"]["settles"] == "paid invoices only"
 
 
 async def test_a_paused_settlement_retries_on_the_same_row(client, session):

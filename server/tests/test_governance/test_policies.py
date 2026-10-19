@@ -310,3 +310,13 @@ def test_a_policy_from_another_tenant_is_not_read(
     activate(session, policy, author=test_user.id, approver=second_admin.id)
     assert policies.active_rules(session, org_id=other_org.id) == []
     assert _decide(session, other_org.id).allowed is True
+
+
+def test_an_unidentified_actor_cannot_approve(session, policy, test_user):
+    """L5: an API key yields no actor; that is ineligibility, not exemption."""
+    version = policies.get_version(session, policy.id, 1)
+    policies.transition(session, policy, version, "REVIEW", actor_user_id=test_user.id)
+    with pytest.raises(ForbiddenError, match="identified user"):
+        policies.transition(session, policy, version, "APPROVED", actor_user_id=None)
+    assert version.state == "REVIEW"
+    assert version.approved_by_user_id is None

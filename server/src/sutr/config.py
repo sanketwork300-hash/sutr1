@@ -1,7 +1,11 @@
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
-load_dotenv(override=True)
+# override=False: a value the process was started with (Helm, compose, Fly
+# secrets) wins over a stray .env in the working directory. The reverse let a
+# checked-in or leftover .env replace the orchestrator's JWT_SECRET_KEY,
+# DATABASE_URL and SECRETS_BACKEND without anything saying so.
+load_dotenv(override=False)
 
 
 class Settings(BaseSettings):
@@ -100,6 +104,11 @@ class Settings(BaseSettings):
     # MCP transports. StreamableHTTP at /mcp is always on and is the default;
     # SSE (GET /sse + POST /messages) is the transport older MCP clients speak.
     mcp_sse_enabled: bool = True
+    # Lifetime of the access tokens the MCP OAuth authorization server mints
+    # for /mcp. Kept short on purpose: a 30-day refresh token accompanies it,
+    # so a leaked bearer is useful for an hour rather than the week that the
+    # human-session `jwt_expire_minutes` allows.
+    mcp_access_token_expire_minutes: int = 60
 
     # ── Event bus (ESDS LLD §5.6, ADR-003) ────────────────────────────────
     # Events are always written to the transactional outbox; this chooses only
@@ -127,6 +136,10 @@ class Settings(BaseSettings):
     # Tool executions allowed per org per minute, enforced in the shared
     # pipeline so REST and MCP are limited alike. 0 disables the limit.
     tool_rate_limit_per_minute: int = 120
+    # Ceiling on how much of an upstream tool response is buffered. The
+    # upstream host is tenant-controlled; a response that is read without a
+    # cap is a response that can exhaust the worker for every tenant on it.
+    tool_response_max_bytes: int = 10 * 1024 * 1024
 
     # Observability. /metrics is off by default: it is an infrastructure
     # endpoint, so it must be a deliberate choice to expose it. When enabled,
@@ -156,8 +169,14 @@ class Settings(BaseSettings):
     # bounds the scan rather than the retention (retention is separate).
     telemetry_window_hours_max: int = 24 * 30
 
-    # Secrets backend: "db" (default) or "db_kms".
-    secrets_backend: str = "db"
+    # Secrets backend: "db_encrypted" (default: AES-256-GCM in the database,
+    # key from SECRETS_ENCRYPTION_KEY or derived from JWT_SECRET_KEY),
+    # "db_kms", "vault", or "db" (plaintext; refused when is_cloud is set).
+    secrets_backend: str = "db_encrypted"
+    # 32 bytes, hex or base64, for the db_encrypted backend. Unset, the key is
+    # derived from JWT_SECRET_KEY by HKDF with a distinct info string — set it
+    # so the secrets key can be rotated independently of session signing.
+    secrets_encryption_key: str = ""
     # AWS KMS options (only used when secrets_backend = "db_kms").
     secrets_kms_key_id: str = ""
     secrets_kms_region: str = ""

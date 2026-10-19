@@ -3,6 +3,7 @@ import time
 import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
+from mcp.shared._httpx_utils import MCP_DEFAULT_SSE_READ_TIMEOUT, MCP_DEFAULT_TIMEOUT
 from sqlmodel import Session
 
 from sutr.db import engine
@@ -42,6 +43,52 @@ def _ensure_safe_upstream(installed: InstalledIntegration) -> None:
         validate_safe_url(installed.url)
 
 
+class UpstreamRedirectRefusedError(RuntimeError):
+    """An upstream MCP server answered with a redirect, which is not followed."""
+
+
+async def _refuse_redirect(response: httpx.Response) -> None:
+    """Response hook: fail the request on any 3xx rather than follow it.
+
+    `follow_redirects=False` on the client already stops httpx from opening
+    the `Location`; the hook turns the redirect into an error at the point it
+    arrives instead of letting the SDK read a 3xx body as an MCP response.
+    """
+    if 300 <= response.status_code < 400:
+        await response.aclose()
+        raise UpstreamRedirectRefusedError(
+            f"Upstream MCP server redirected (HTTP {response.status_code}); "
+            "redirects are not followed. Use the final URL directly."
+        )
+
+
+def http_client_factory(
+    headers: dict[str, str] | None = None,
+    timeout: httpx.Timeout | None = None,
+    auth: httpx.Auth | None = None,
+) -> httpx.AsyncClient:
+    """The httpx client the MCP SDK uses to reach a remote server.
+
+    The SDK's own factory sets `follow_redirects=True` ("always enabled"). The
+    server URL is screened once by `validate_safe_url`, so following a
+    redirect from it would be a request to an address nothing has screened —
+    a public host answering `302 Location: http://169.254.169.254/` is the
+    textbook case. Headers, timeouts and auth are passed through exactly as
+    the SDK hands them over, so the transport itself behaves the same.
+    """
+    return httpx.AsyncClient(
+        headers=headers,
+        timeout=(
+            timeout
+            if timeout is not None
+            else httpx.Timeout(MCP_DEFAULT_TIMEOUT, read=MCP_DEFAULT_SSE_READ_TIMEOUT)
+        ),
+        auth=auth,
+        follow_redirects=False,
+        event_hooks={"response": [_refuse_redirect]},
+    )
+
+
 def _unwrap_exception(e: BaseException) -> str:
     """Return a readable error string, unpacking ExceptionGroup sub-exceptions."""
     if isinstance(e, BaseExceptionGroup):
@@ -54,7 +101,9 @@ async def validate_token(url: str, token: str) -> None:
     """Verify a token works by attempting to list tools. Raises RuntimeError on failure."""
     headers = {"Authorization": f"Bearer {token}"}
     try:
-        async with streamablehttp_client(url, headers=headers) as (r, w, _):
+        async with streamablehttp_client(
+            url, headers=headers, httpx_client_factory=http_client_factory
+        ) as (r, w, _):
             async with ClientSession(r, w) as session:
                 await session.initialize()
                 await session.list_tools()
@@ -68,7 +117,9 @@ async def list_tools(
     _ensure_safe_upstream(installed)
     headers = _auth_headers(installed, oauth_state)
     try:
-        async with streamablehttp_client(installed.url, headers=headers) as (r, w, _):
+        async with streamablehttp_client(
+            installed.url, headers=headers, httpx_client_factory=http_client_factory
+        ) as (r, w, _):
             async with ClientSession(r, w) as session:
                 await session.initialize()
                 result = await session.list_tools()
@@ -110,7 +161,9 @@ async def call_tool(
         },
     ) as active_span:
         try:
-            async with streamablehttp_client(installed.url, headers=headers) as (r, w, _):
+            async with streamablehttp_client(
+                installed.url, headers=headers, httpx_client_factory=http_client_factory
+            ) as (r, w, _):
                 async with ClientSession(r, w) as session:
                     await session.initialize()
                     result = await session.call_tool(tool_name, args)

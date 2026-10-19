@@ -55,7 +55,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "sutr.secretName" -}}
 {{- if not .Values.existingSecret -}}
-{{- fail "existingSecret is required: create a Secret with DATABASE_URL and JWT_SECRET_KEY and name it here" -}}
+{{- fail "existingSecret is required: create a Secret with DATABASE_URL, JWT_SECRET_KEY and SECRETS_ENCRYPTION_KEY and name it here" -}}
 {{- end -}}
 {{- .Values.existingSecret -}}
 {{- end -}}

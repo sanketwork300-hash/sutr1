@@ -48,6 +48,7 @@ from sutr.models.governance_policy import (
     GovernancePolicy,
     GovernancePolicyVersion,
 )
+from sutr.provisioning import rules as abac
 
 KEY = re.compile(r"^[a-z0-9][a-z0-9_-]{1,62}[a-z0-9]$")
 
@@ -106,8 +107,6 @@ def validate_document(kind: str, document: dict[str, Any]) -> dict[str, Any]:
     malformed rule discovered while deciding a live request is a rule that has
     already failed open or closed once before anybody knew.
     """
-    from sutr.provisioning import rules as abac
-
     if kind != KIND_ACCESS:
         # Compliance and operational policies are declarative prose for a
         # reviewer. Nothing evaluates them, and `describe()` says so rather
@@ -310,7 +309,12 @@ def transition(
     check(version.state, target)
 
     if target == APPROVED:
-        if actor_user_id is not None and version.authored_by_user_id == actor_user_id:
+        if actor_user_id is None:
+            # An unidentified actor is not exempt from four-eyes; it is
+            # ineligible. The only caller that produces `None` is an API key,
+            # and a key the author holds is the author.
+            raise ForbiddenError("A decision needs an identified user; API keys cannot approve.")
+        if version.authored_by_user_id == actor_user_id:
             raise ForbiddenError(
                 "You wrote this policy version, so you cannot approve it. Separation of duties "
                 "(LLD §5.2.10) is unconditional for policies: another administrator has to "

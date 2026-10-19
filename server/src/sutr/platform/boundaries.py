@@ -207,6 +207,9 @@ CONTROL_PLANE = (
             "email",
             "connections",
             "api.connections",
+            # Builds every server-issued redirect into the UI (connected
+            # accounts, Google sign-in); both callers are identity flows.
+            "ui_redirect",
             "credentials.store",
             "api.integration_credentials",
         ),

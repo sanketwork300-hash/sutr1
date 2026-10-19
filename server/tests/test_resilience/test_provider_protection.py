@@ -77,7 +77,9 @@ _REAL_ASYNC_CLIENT = httpx.AsyncClient
 
 
 def _answer_with(monkeypatch, handler):
-    monkeypatch.setattr("sutr.api_client.validate_safe_url", lambda url, **kw: None)
+    monkeypatch.setattr(
+        "sutr.upstream_safety._resolve_host", lambda hostname, port: ("93.184.216.34",)
+    )
     calls = {"n": 0}
 
     def counting(request):
@@ -190,7 +192,7 @@ async def test_an_unsafe_url_is_this_platforms_refusal_not_a_provider_failure(
     def refuse_url(url, **kwargs):
         raise UnsafeUpstreamUrlError("Host resolves to a blocked network range")
 
-    monkeypatch.setattr("sutr.api_client.validate_safe_url", refuse_url)
+    monkeypatch.setattr("sutr.api_client.pinned_request_target", refuse_url)
 
     for _ in range(5):
         await _call(session, test_org)
@@ -259,11 +261,14 @@ async def test_the_providers_endpoint_reports_what_this_replica_quarantined(clie
     assert body["scope"] == "this replica only"
 
 
-async def test_an_operator_can_close_a_circuit_and_it_is_audited(client, session, test_org):
+async def test_an_operator_can_close_a_circuit_and_it_is_audited(
+    client, session, test_org, test_user
+):
     from sqlmodel import select
 
     from sutr.models.audit_event import AuditEvent
 
+    test_user.is_admin = True
     breaker.reset()
     for _ in range(3):
         breaker.record_failure(HOST, "refused")
@@ -279,7 +284,37 @@ async def test_an_operator_can_close_a_circuit_and_it_is_audited(client, session
     assert recorded[0].target_id == HOST
 
 
-async def test_closing_a_circuit_that_is_not_open_is_a_404(client):
+async def test_a_tenant_administrator_cannot_close_a_circuit(client, session, test_user):
+    """S17/L13: the breaker is instance-wide, keyed by provider and shared by
+    every tenant on the replica. An organization's `org:manage` says nothing
+    about the other organizations a close would affect."""
+    from sqlmodel import select
+
+    from sutr.models.audit_event import AuditEvent
+
+    assert test_user.is_admin is False
+    breaker.reset()
+    for _ in range(3):
+        breaker.record_failure(HOST, "refused")
+
+    response = await client.post(f"/v1/resilience/providers/{HOST}/close")
+
+    assert response.status_code == 403
+    assert breaker.health(HOST)["state"] != breaker.CLOSED
+    assert (
+        session.exec(
+            select(AuditEvent).where(AuditEvent.action == "resilience.circuit_closed")
+        ).all()
+        == []
+    )
+    # Nor does a non-admin learn, from 403 versus 404, whether a circuit exists.
+    assert (await client.post("/v1/resilience/providers/never.seen.example/close")).status_code == (
+        403
+    )
+
+
+async def test_closing_a_circuit_that_is_not_open_is_a_404(client, test_user):
+    test_user.is_admin = True
     breaker.reset()
     assert (await client.post("/v1/resilience/providers/never.seen.example/close")).status_code == (
         404

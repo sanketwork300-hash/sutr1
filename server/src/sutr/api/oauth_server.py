@@ -19,7 +19,12 @@ router = APIRouter(prefix="/api/oauth/authorize", tags=["oauth-server"])
 class SessionInfoResponse(BaseModel):
     client_id: str
     client_name: str | None
+    # The consent page must show where the code will be sent: the client name
+    # is attacker-chosen at registration time, the redirect host is not.
     redirect_uri: str
+    # True when the client was created through RFC 7591 dynamic registration,
+    # i.e. anyone on the internet could have picked `client_name`.
+    dynamically_registered: bool
     scope: str | None
     resource: str | None
     expires_at: int
@@ -45,7 +50,10 @@ def get_session_info(
     if req.expires_at < int(time.time()):
         raise HTTPException(status_code=410, detail="Authorization session expired")
 
-    # Look up client name
+    # Look up client name. Every row in oauth_client is written by
+    # SutrOAuthProvider.register_client, which only the SDK's POST /register
+    # handler calls — there is no operator-managed client list — so a row's
+    # existence is what "dynamically registered" means here.
     client_name: str | None = None
     client_row = db.exec(select(OAuthClient).where(OAuthClient.client_id == req.client_id)).first()
     if client_row:
@@ -55,6 +63,7 @@ def get_session_info(
         client_id=req.client_id,
         client_name=client_name,
         redirect_uri=req.redirect_uri,
+        dynamically_registered=client_row is not None,
         scope=req.scope,
         resource=req.resource,
         expires_at=req.expires_at,

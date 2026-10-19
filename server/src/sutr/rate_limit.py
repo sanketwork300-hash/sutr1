@@ -125,6 +125,16 @@ login_failure_ip_limiter = IPRateLimiter(
     window_seconds=IP_WINDOW_SECONDS,
 )
 
+# Dynamic client registration (POST /register) is unauthenticated by
+# specification, and every call persists an OAuthClient row plus an encrypted
+# secret. Ten registrations per address per ten minutes is generous for any
+# real client and a hard brake on filling the table from one host.
+oauth_register_ip_limiter = IPRateLimiter(
+    name="oauth-register",
+    max_requests=10,
+    window_seconds=600,
+)
+
 # The window store is keyed by an arbitrary string, so the same class serves
 # non-IP keys. This alias names that honestly at the call site.
 SlidingWindowRateLimiter = IPRateLimiter

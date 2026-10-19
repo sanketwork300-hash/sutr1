@@ -4,7 +4,7 @@ from typing import Union
 
 import httpx
 
-from sutr.integrations.bundled.resend._http import _BASE_URL, response_to_result
+from sutr.integrations.bundled.resend._http import BASE_URL, response_to_result
 from sutr.integrations.types import ApiTool, CustomTool, Param
 
 # ---------------------------------------------------------------------------
@@ -99,7 +99,7 @@ async def _run_send_batch_emails(args: dict, auth_headers: dict) -> dict:
         }
     async with httpx.AsyncClient() as client:
         r = await client.post(
-            f"{_BASE_URL}/emails/batch",
+            f"{BASE_URL}/emails/batch",
             json=emails,
             headers=auth_headers,
             timeout=30.0,

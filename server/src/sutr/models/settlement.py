@@ -21,7 +21,7 @@ class Settlement(SQLModel, table=True):
     """One revenue-share run for one provider over one period (LLD §5.1).
 
     The split is **never hard-coded** (build prompt §44). It comes from
-    configuration, may be overridden per run, and is recorded on the row — so
+    configuration (never from the request) and is recorded on the row — so
     an old settlement is explained by the share that applied then, not by the
     share that applies now.
 

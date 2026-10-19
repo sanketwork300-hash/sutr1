@@ -151,20 +151,24 @@ class DeploymentProvider(ABC):
         include a `url` key pointing at the served MCP endpoint."""
 
     @abstractmethod
-    async def status(self, state: dict, target: ProviderTarget) -> ProviderStatus: ...
+    async def status(self, state: dict, target: ProviderTarget) -> ProviderStatus:
+        """Report the deployment's current state as the provider sees it."""
 
     @abstractmethod
-    async def start(self, state: dict, target: ProviderTarget) -> None: ...
+    async def start(self, state: dict, target: ProviderTarget) -> None:
+        """Resume serving a stopped deployment."""
 
     @abstractmethod
-    async def stop(self, state: dict, target: ProviderTarget) -> None: ...
+    async def stop(self, state: dict, target: ProviderTarget) -> None:
+        """Stop serving without deleting what the deployment created."""
 
     @abstractmethod
     async def remove(self, state: dict, target: ProviderTarget) -> None:
         """Tear down everything the deployment created. Must be idempotent."""
 
     @abstractmethod
-    async def logs(self, state: dict, target: ProviderTarget, tail: int = 100) -> str: ...
+    async def logs(self, state: dict, target: ProviderTarget, tail: int = 100) -> str:
+        """Return the last *tail* lines of the deployment's logs."""
 
     # ── Update, rollback, metrics ────────────────────────────────────────────
     #

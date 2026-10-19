@@ -19,7 +19,7 @@ from sqlmodel import Session, col, or_, select
 
 from sutr.authz import ensure_agent_can
 from sutr.common import Page, PageRequest, envelope
-from sutr.common.errors import NotFoundError
+from sutr.common.errors import ForbiddenError, InvalidRequestError, NotFoundError
 from sutr.db import get_session
 from sutr.dependencies import AgentAuth, get_agent_auth
 from sutr.events import outbox
@@ -47,6 +47,22 @@ def _serialize(row: OutboxEvent) -> dict:
         "created_at": row.created_at.isoformat(),
         "published_at": row.published_at.isoformat() if row.published_at else None,
     }
+
+
+def _cursor_id(page_request: PageRequest) -> int | None:
+    """The row id a cursor points at, or None when there is no cursor.
+
+    The cursor is caller-supplied; a value that decodes but does not hold an
+    integer id is a bad request, not a server error.
+    """
+    if not page_request.cursor or "id" not in page_request.cursor:
+        return None
+    try:
+        return int(page_request.cursor["id"])
+    except (TypeError, ValueError):
+        raise InvalidRequestError(
+            "`cursor` is not a cursor this endpoint issued.", details={"parameter": "cursor"}
+        )
 
 
 def _visible(statement, org_id: uuid.UUID):
@@ -77,9 +93,10 @@ def list_events(
         statement = statement.where(OutboxEvent.state == state)
     if correlation_id:
         statement = statement.where(OutboxEvent.correlation_id == correlation_id)
-    if page_request.cursor and "id" in page_request.cursor:
+    before = _cursor_id(page_request)
+    if before is not None:
         # Newest first, so the next page is everything *older* than the cursor.
-        statement = statement.where(col(OutboxEvent.id) < int(page_request.cursor["id"]))
+        statement = statement.where(col(OutboxEvent.id) < before)
 
     rows = list(
         session.exec(
@@ -106,8 +123,9 @@ def list_dead_letter(
     statement = _visible(
         select(OutboxEvent).where(OutboxEvent.state == DEAD_LETTERED), agent_auth.org.id
     )
-    if page_request.cursor and "id" in page_request.cursor:
-        statement = statement.where(col(OutboxEvent.id) < int(page_request.cursor["id"]))
+    before = _cursor_id(page_request)
+    if before is not None:
+        statement = statement.where(col(OutboxEvent.id) < before)
     rows = list(
         session.exec(
             statement.order_by(col(OutboxEvent.id).desc()).limit(page_request.fetch_limit)
@@ -138,6 +156,14 @@ def retry_event(
     ).first()
     if row is None:
         raise NotFoundError(f"No event with id {event_id}.")
+    if row.tenant_id is None and not (agent_auth.user is not None and agent_auth.user.is_admin):
+        # Platform-wide events are readable by every tenant but belong to none
+        # of them. Re-queueing one re-runs its consumers for the whole
+        # instance, which is a platform administrator's call.
+        raise ForbiddenError(
+            "This event is platform-wide, not this organization's. Only a platform "
+            "administrator can retry it."
+        )
     if row.state in (FAILED, DEAD_LETTERED):
         outbox.retry(session, row)
         session.commit()

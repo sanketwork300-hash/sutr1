@@ -428,12 +428,15 @@ class AwsProvider(DeploymentProvider):
             try:
                 await client.call("codebuild", "DeleteProject", {"name": project})
             except AwsError:
+                # Best effort: the service is already gone, and a leftover
+                # project costs nothing and must not fail the teardown.
                 pass
         bucket, key = state.get("bucket"), state.get("object")
         if bucket and key:
             try:
                 await client.s3_delete_object(bucket, key)
             except ProviderError:
+                # Best effort, as above: a stale staged object is harmless.
                 pass
 
     async def logs(self, state: dict, target: ProviderTarget, tail: int = 100) -> str:

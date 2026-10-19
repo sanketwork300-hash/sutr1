@@ -4,13 +4,21 @@ import {
   buildHeaders,
   request,
 } from "../client.js";
-import { maskKey, type Config } from "../config.js";
+import {
+  credentialHeaderValue,
+  instanceBaseUrl,
+  maskKey,
+  stripTrailingSlashes,
+  type Config,
+} from "../config.js";
 import { ConnectError } from "./errors.js";
 
 export interface ConfigurationCheck {
   url: string;
   mcpEndpoint: string;
   authMode: string;
+  /** Set when the API key will travel over plain http to a non-loopback host. */
+  insecureTransport: boolean;
 }
 
 export interface SessionCheck {
@@ -37,7 +45,7 @@ const AUTH_HINT =
   "Create an API key in the Sutr UI under Develop → API Keys, then run:\n  sutr auth login --api-key ap_...";
 
 export function mcpEndpointFor(url: string): string {
-  return `${url.replace(/\/+$/, "")}/mcp`;
+  return `${stripTrailingSlashes(url)}/mcp`;
 }
 
 /**
@@ -54,20 +62,13 @@ export function checkConfiguration(config: Config): ConfigurationCheck {
     );
   }
 
-  let parsed: URL;
+  let base: string;
   try {
-    parsed = new URL(url);
-  } catch {
+    base = instanceBaseUrl(config);
+  } catch (error) {
     throw new ConnectError(
       "Invalid configuration",
-      `'${url}' is not a valid URL.`,
-      "sutr auth set-instance-url https://app.sutr.sh",
-    );
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new ConnectError(
-      "Invalid configuration",
-      `'${url}' must use http or https, not '${parsed.protocol.replace(":", "")}'.`,
+      (error as Error).message,
       "sutr auth set-instance-url https://app.sutr.sh",
     );
   }
@@ -75,16 +76,43 @@ export function checkConfiguration(config: Config): ConfigurationCheck {
   if (config.auth_mode !== "api_key" || !config.api_key) {
     throw new ConnectError(
       "Not authenticated",
-      `No API key is stored for ${url}.`,
+      `No API key is stored for ${base}.`,
       AUTH_HINT,
     );
   }
+  try {
+    credentialHeaderValue(config.api_key);
+  } catch (error) {
+    throw new ConnectError("Invalid configuration", (error as Error).message, AUTH_HINT);
+  }
 
   return {
-    url: url.replace(/\/+$/, ""),
-    mcpEndpoint: mcpEndpointFor(url),
+    url: base,
+    mcpEndpoint: mcpEndpointFor(base),
     authMode: config.auth_mode,
+    insecureTransport: isInsecureTransport(new URL(base)),
   };
+}
+
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+
+/**
+ * Plain http is only safe to a host that never leaves this machine. Anywhere
+ * else, every request carries the API key in the clear and anyone on the path
+ * can read it — or answer in the server's place.
+ */
+export function isInsecureTransport(url: URL): boolean {
+  if (url.protocol !== "http:") return false;
+  const host = url.hostname.toLowerCase();
+  return !(LOOPBACK_HOSTS.has(host) || host.endsWith(".localhost") || host.startsWith("127."));
+}
+
+export function insecureTransportWarning(url: string): string {
+  return (
+    `${url} is plain http, not https: your API key is sent unencrypted on every request, ` +
+    "and anything between you and the server can read it or impersonate the server. " +
+    "Use an https URL unless the instance is on this machine."
+  );
 }
 
 /**
@@ -136,7 +164,7 @@ export async function verifyMcpEndpoint(
   config: Config,
   timeoutMs: number,
 ): Promise<{ endpoint: string; status: number }> {
-  const endpoint = mcpEndpointFor(config.url);
+  const endpoint = mcpEndpointFor(instanceBaseUrl(config));
   let response: Response;
   try {
     response = await fetch(endpoint, {

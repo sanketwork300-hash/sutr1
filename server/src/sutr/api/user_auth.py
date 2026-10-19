@@ -1,6 +1,7 @@
 import hashlib
 import logging
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -10,7 +11,16 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from sutr.analytics import posthog_client
-from sutr.auth_tokens import create_access_token
+from sutr.api.second_factor import (
+    clear_login_failures,
+    record_second_factor_failure,
+    require_not_locked,
+)
+from sutr.auth_tokens import (
+    TOTP_CHALLENGE_TTL,
+    create_access_token,
+    decode_totp_challenge_token,
+)
 from sutr.config import settings
 from sutr.db import get_session
 from sutr.dependencies import default_membership, oauth2_scheme
@@ -45,6 +55,13 @@ _DUMMY_HASH = hash_password(secrets.token_urlsafe(32))
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class TotpChallengeRequest(BaseModel):
+    # The `totp_challenge` JWT a first-factor-only login (Google sign-in)
+    # handed to the browser, plus the authenticator or recovery code.
+    challenge_token: str
+    code: str
 
 
 def _client_ip(request: Request) -> str:
@@ -118,13 +135,6 @@ def login(
 
     assert user is not None  # narrowed by password_ok
 
-    if user.failed_login_attempts or user.locked_until is not None:
-        user.failed_login_attempts = 0
-        user.locked_until = None
-        session.add(user)
-        session.commit()
-    login_failure_ip_limiter.reset_ip(ip)
-
     if not settings.skip_email_verification and not user.email_verified:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -133,6 +143,9 @@ def login(
 
     # Second factor: once a user enables TOTP it is a real login factor, not
     # just a mutation gate. Recovery codes are accepted and burned on use.
+    # The failure counters are only cleared once BOTH factors pass; clearing
+    # them after the password alone would let someone who knows the password
+    # guess codes forever without the lockout ever engaging.
     if user.totp_enabled:
         if not totp_code:
             raise HTTPException(
@@ -142,19 +155,44 @@ def login(
                     "message": "Enter the code from your authenticator app.",
                 },
             )
-        if not verify_second_factor(user, totp_code):
+        if not verify_second_factor(session, user, totp_code):
             login_failure_ip_limiter.record(ip)
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={
-                    "error": "totp_invalid",
-                    "message": "That code didn't match — try again with a fresh one.",
-                },
-            )
-        # Persist a burned recovery code.
-        session.add(user)
-        session.commit()
+            record_second_factor_failure(session, user)
+            raise _totp_invalid()
 
+    clear_login_failures(session, user)
+    # Also persists a burned recovery code / accepted TOTP step.
+    session.add(user)
+    session.commit()
+    login_failure_ip_limiter.reset_ip(ip)
+
+    return _issue_login_token(session, request, user, auth_method="password")
+
+
+def _totp_invalid() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "error": "totp_invalid",
+            "message": "That code didn't match — try again with a fresh one.",
+        },
+    )
+
+
+def _invalid_challenge() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail={
+            "error": "challenge_invalid",
+            "message": "This sign-in attempt has expired. Start again.",
+        },
+    )
+
+
+def _issue_login_token(
+    session: Session, request: Request, user: User, *, auth_method: str
+) -> TokenResponse:
+    """Mint the access token for a fully authenticated user and record the login."""
     token = create_access_token(str(user.id), token_version=user.token_version)
     # Audit under the user's default org (logins are not org-scoped requests).
     membership = default_membership(session, user.id)
@@ -165,15 +203,76 @@ def login(
             action="auth.login",
             summary=f"{user.email} logged in",
             actor_user_id=user.id,
+            metadata={"auth_method": auth_method},
             request=request,
         )
         session.commit()
     posthog_client.capture(
         distinct_id=str(user.id),
         event="user_logged_in",
-        properties={"auth_method": "password"},
+        properties={"auth_method": auth_method},
     )
     return TokenResponse(access_token=token)
+
+
+@router.post("/totp-challenge", response_model=TokenResponse)
+def complete_totp_challenge(
+    body: TotpChallengeRequest,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> TokenResponse:
+    """Second step of a sign-in whose first factor was not a password.
+
+    Google sign-in hands the browser a short-lived `totp_challenge` token
+    instead of an access token when the account has TOTP enabled. This
+    endpoint turns that token plus a valid code into a real session, under the
+    same per-IP limiter and per-account lockout as password login. The
+    challenge is single-use.
+    """
+    ip = _client_ip(request)
+    retry_after = login_failure_ip_limiter.check(ip)
+    if retry_after:
+        raise _rate_limited(retry_after)
+
+    try:
+        user_id, token_version = decode_totp_challenge_token(body.challenge_token)
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise _invalid_challenge()
+
+    challenge_hash = hashlib.sha256(body.challenge_token.encode()).hexdigest()
+    if session.get(OAuthRevokedToken, challenge_hash) is not None:
+        raise _invalid_challenge()
+
+    user = session.get(User, user_uuid)
+    if (
+        user is None
+        or not user.is_active
+        or int(user.token_version or 0) != token_version
+        or not user.totp_enabled
+    ):
+        raise _invalid_challenge()
+
+    require_not_locked(user)
+
+    if not verify_second_factor(session, user, body.code):
+        login_failure_ip_limiter.record(ip)
+        record_second_factor_failure(session, user)
+        raise _totp_invalid()
+
+    clear_login_failures(session, user)
+    session.add(user)
+    # Burn the challenge: one code exchange per first-factor proof.
+    session.add(
+        OAuthRevokedToken(
+            token_hash=challenge_hash,
+            expires_at=int((datetime.now(timezone.utc) + TOTP_CHALLENGE_TTL).timestamp()),
+        )
+    )
+    session.commit()
+    login_failure_ip_limiter.reset_ip(ip)
+
+    return _issue_login_token(session, request, user, auth_method="google")
 
 
 @router.post("/logout", status_code=204)

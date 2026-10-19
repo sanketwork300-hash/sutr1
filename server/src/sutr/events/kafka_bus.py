@@ -89,8 +89,11 @@ class KafkaBus:
             return False, self._unavailable_reason
         try:
             self._get_producer()
-        except RuntimeError as exc:
-            return False, str(exc)
+        except RuntimeError:
+            # `_get_producer` records why before it raises. Report that record
+            # rather than the exception, so only our own wording ever reaches
+            # `/v1/platform/capabilities`.
+            return False, self._unavailable_reason or "The Kafka producer could not be created."
         return True, None
 
     def close(self) -> None:

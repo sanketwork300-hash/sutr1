@@ -279,7 +279,10 @@ async def test_capabilities_reports_the_layers_the_passes_and_the_secret_store(c
         "policy",
     ]
     assert data["access_passes"]["revocation"]["enforced_by_generated_runtimes"] is False
-    assert data["secrets"]["at_rest"] == "plaintext in the database"
+    # The default backend encrypts at rest; the description says so rather
+    # than claiming an external store.
+    assert data["secrets"]["backend"] == "db_encrypted"
+    assert data["secrets"]["at_rest"].startswith("AES-256-GCM in the database")
     assert data["secrets"]["dynamic_credentials"]["available"] is False
     assert "NOT IMPLEMENTED" in data["secrets"]["dynamic_credentials"]["unavailable_reason"]
 

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api } from '@/api/client'
+import { GOOGLE_NONCE_KEY } from '@/lib/googleNonce'
 
 interface GoogleLoginButtonProps {
   label?: string
@@ -17,7 +18,11 @@ export function GoogleLoginButton({
     setError(null)
     setLoading(true)
     try {
-      const { authorization_url } = await api.auth.googleLogin()
+      const nonce = newNonce()
+      // Per-tab, so the callback can prove the sign-in was started here and
+      // not pasted in from somewhere else.
+      window.sessionStorage.setItem(GOOGLE_NONCE_KEY, nonce)
+      const { authorization_url } = await api.auth.googleLogin(nonce)
       window.location.href = authorization_url
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Google sign-in unavailable')
@@ -46,6 +51,15 @@ export function GoogleLoginButton({
       {error && <p style={errorStyle}>{error}</p>}
     </div>
   )
+}
+
+/** 32 random bytes as base64url: 43 characters, unguessable. */
+function newNonce(): string {
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
 function GoogleGlyph() {

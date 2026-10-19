@@ -6,6 +6,7 @@ import { BrandLockup } from '@/components/shell/BrandMark'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { api } from '@/api/client'
+import { safeInternalPath } from '@/lib/safeRedirect'
 import { useMediaQuery } from '@/lib/useMediaQuery'
 import { useAuthStore } from '@/stores/auth'
 import { useEmailVerificationStore } from '@/stores/emailVerification'
@@ -23,6 +24,8 @@ export default function SignupPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const redirect = searchParams.get('redirect')
+    ? safeInternalPath(searchParams.get('redirect'))
+    : null
   const loginHref = redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : '/login'
 
   async function onSubmit(e: { preventDefault(): void }) {
@@ -49,7 +52,7 @@ export default function SignupPage() {
       const res = await api.auth.login(email, password)
       clearPendingVerification()
       setAuth(res.access_token)
-      navigate(redirect || '/app')
+      navigate(safeInternalPath(redirect))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed')
     } finally {

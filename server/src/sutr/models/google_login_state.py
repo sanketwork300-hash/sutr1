@@ -20,5 +20,10 @@ class GoogleLoginState(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     state: str = Field(unique=True, index=True)
     code_verifier: str
+    # Browser-generated nonce echoed back in the callback fragment so the UI
+    # can refuse a token for a flow it did not start (login CSRF / fixation).
+    # The row is single-use and deleted by the callback, so the raw value is
+    # stored rather than a hash.
+    nonce: str | None = Field(default=None)
     redirect_after: str | None = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow)

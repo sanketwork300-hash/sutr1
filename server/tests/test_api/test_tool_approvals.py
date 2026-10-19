@@ -488,9 +488,9 @@ async def test_await_endpoint_returns_approved_after_approve_once(
         resp = await client.post(f"/api/tool-approvals/requests/{req.id}/approve-once")
         assert resp.status_code == 200
 
-    approver_task = asyncio.create_task(approver())
-    resp = await client.post(f"/api/tool-approvals/requests/{req.id}/await")
-    await approver_task
+    resp, _ = await asyncio.gather(
+        client.post(f"/api/tool-approvals/requests/{req.id}/await"), approver()
+    )
 
     assert resp.status_code == 200
     assert resp.json()["status"] == "approved"
@@ -508,9 +508,9 @@ async def test_await_endpoint_returns_denied_after_human_decision(
         resp = await client.post(f"/api/tool-approvals/requests/{req.id}/deny")
         assert resp.status_code == 200
 
-    denier_task = asyncio.create_task(denier())
-    resp = await client.post(f"/api/tool-approvals/requests/{req.id}/await")
-    await denier_task
+    resp, _ = await asyncio.gather(
+        client.post(f"/api/tool-approvals/requests/{req.id}/await"), denier()
+    )
 
     assert resp.status_code == 200
     assert resp.json()["status"] == "denied"

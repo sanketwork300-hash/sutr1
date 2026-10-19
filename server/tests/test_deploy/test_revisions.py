@@ -146,10 +146,19 @@ class _NoUpdateProvider(DeploymentProvider):
     async def deploy(self, spec):
         return {"url": "https://x.example.com/mcp"}
 
-    async def status(self, state, target): ...
-    async def start(self, state, target): ...
-    async def stop(self, state, target): ...
-    async def remove(self, state, target): ...
+    # Never reached by these tests; they exist only to satisfy the interface.
+    async def status(self, state, target):
+        raise NotImplementedError
+
+    async def start(self, state, target):
+        raise NotImplementedError
+
+    async def stop(self, state, target):
+        raise NotImplementedError
+
+    async def remove(self, state, target):
+        raise NotImplementedError
+
     async def logs(self, state, target, tail=100):
         return ""
 
@@ -197,7 +206,8 @@ async def test_every_swaraj_operation_refuses_loudly(operation):
 
 
 async def test_swaraj_remove_is_idempotent_because_nothing_was_ever_created():
-    assert await SwarajCloudProvider().remove({}, ProviderTarget()) is None
+    result = await SwarajCloudProvider().remove({}, ProviderTarget())
+    assert result is None
 
 
 def test_swaraj_is_registered_and_visibly_disabled():

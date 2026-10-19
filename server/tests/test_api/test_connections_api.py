@@ -18,7 +18,10 @@ from sutr.models.user import User
 
 
 @pytest.fixture(autouse=True)
-def _configured(monkeypatch):
+def _configured(monkeypatch, client):
+    # The browser-binding cookie is Secure because `base_url` is https, so the
+    # test client has to speak https for its cookie jar to send it back.
+    client.base_url = "https://sutr.example.com"
     monkeypatch.setattr("sutr.config.settings.github_oauth_client_id", "gh-client")
     monkeypatch.setattr("sutr.config.settings.github_oauth_client_secret", "gh-secret")
     monkeypatch.setattr("sutr.config.settings.gcp_oauth_client_id", "gcp-client")
@@ -38,7 +41,7 @@ def _patch_flow(monkeypatch, handler):
 
 
 def _github_token_handler(request):
-    if "api.github.com" in str(request.url):
+    if request.url.host == "api.github.com":
         return httpx.Response(200, json={"login": "octocat"})
     return httpx.Response(200, json={"access_token": "gho_abc", "scope": "repo"})
 
@@ -119,6 +122,72 @@ async def test_callback_stores_the_connection_and_redirects_into_the_ui(
     assert connection.org_id == test_org.id and connection.user_id == test_user.id
     # The state row is consumed.
     assert session.exec(select(OAuthConnectState)).all() == []
+
+
+async def test_authorize_binds_the_flow_to_the_browser_with_a_cookie(client):
+    resp = await client.post("/api/connections/github/authorize", json={})
+    cookie = resp.headers["set-cookie"]
+    assert cookie.startswith("sutr_connect=")
+    assert "HttpOnly" in cookie
+    assert "Secure" in cookie
+    assert "SameSite=lax" in cookie.lower().replace("samesite=lax", "SameSite=lax")
+    assert "Path=/api/connections" in cookie
+    assert "Max-Age=900" in cookie
+
+
+async def test_a_callback_from_another_browser_is_refused(client, session, monkeypatch):
+    """The consent URL handed to a victim must not land the victim's tokens on
+    the requester's connection: no cookie, no connection, and the state is
+    spent so it cannot be retried from the right browser either."""
+    _patch_flow(monkeypatch, _github_token_handler)
+    await _start(client)
+    state = session.exec(select(OAuthConnectState)).one().state
+    client.cookies.clear()
+
+    resp = await client.get(
+        "/api/connections/github/callback", params={"state": state, "code": "abc"}
+    )
+    assert resp.status_code == 302
+    assert "connection_error=browser_mismatch" in resp.headers["location"]
+    assert session.exec(select(ProviderConnection)).all() == []
+    assert session.exec(select(OAuthConnectState)).all() == []
+
+
+async def test_a_forged_binding_cookie_is_refused(client, session, monkeypatch):
+    _patch_flow(monkeypatch, _github_token_handler)
+    await _start(client)
+    state = session.exec(select(OAuthConnectState)).one().state
+    client.cookies.set("sutr_connect", "0" * 64, domain="sutr.example.com", path="/api/connections")
+
+    resp = await client.get(
+        "/api/connections/github/callback", params={"state": state, "code": "abc"}
+    )
+    assert "connection_error=browser_mismatch" in resp.headers["location"]
+    assert session.exec(select(ProviderConnection)).all() == []
+
+
+async def test_a_binding_cookie_from_one_flow_does_not_open_another(client, session, monkeypatch):
+    """The cookie is an HMAC over the state, so the requester's own cookie
+    cannot complete a flow it did not start."""
+    _patch_flow(monkeypatch, _github_token_handler)
+    await _start(client)
+    first_state = session.exec(select(OAuthConnectState)).one().state
+    own_cookie = client.cookies.get("sutr_connect")
+    await _start(client)
+    other_state = next(
+        row.state
+        for row in session.exec(select(OAuthConnectState)).all()
+        if row.state != first_state
+    )
+    client.cookies.set(
+        "sutr_connect", own_cookie, domain="sutr.example.com", path="/api/connections"
+    )
+
+    resp = await client.get(
+        "/api/connections/github/callback", params={"state": other_state, "code": "abc"}
+    )
+    assert "connection_error=browser_mismatch" in resp.headers["location"]
+    assert session.exec(select(ProviderConnection)).all() == []
 
 
 async def test_a_replayed_state_is_refused(client, session, monkeypatch):
@@ -356,7 +425,8 @@ async def test_a_connection_belonging_to_another_user_is_invisible(
     session.add(connection)
     session.commit()
 
-    assert (await client.delete(f"/api/connections/{connection.id}")).status_code == 404
+    response = await client.delete(f"/api/connections/{connection.id}")
+    assert response.status_code == 404
     assert (await client.get(f"/api/connections/{connection.id}/targets")).status_code == 404
 
 

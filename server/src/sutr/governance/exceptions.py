@@ -125,7 +125,11 @@ def decide(
     """Approve or reject. The requester may not decide their own exception."""
     if record.state != STATE_REQUESTED:
         raise ConflictError(f"This exception is already {record.state}.")
-    if decided_by_user_id is not None and record.requested_by_user_id == decided_by_user_id:
+    if decided_by_user_id is None:
+        # Not exempt from four-eyes: ineligible. An API key is held by somebody,
+        # and that somebody may be the requester.
+        raise ForbiddenError("A decision needs an identified user; API keys cannot approve.")
+    if record.requested_by_user_id == decided_by_user_id:
         raise ForbiddenError(
             "You requested this exception, so somebody else has to decide it. An exception "
             "self-approved is a control removed."

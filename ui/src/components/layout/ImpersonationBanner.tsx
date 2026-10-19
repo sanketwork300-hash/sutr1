@@ -1,6 +1,29 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
+
+/**
+ * The banner for pages outside the console shell — consent, approvals, invites.
+ *
+ * The shell loads the profile that says whether this session is an admin
+ * impersonating someone; these pages do not, so this variant fetches it and
+ * pins the banner over whatever layout the page has.
+ */
+export function StandaloneImpersonationBanner() {
+  const token = useAuthStore((s) => s.token)
+  const email = useAuthStore((s) => s.email)
+  const fetchMe = useAuthStore((s) => s.fetchMe)
+
+  useEffect(() => {
+    if (token && !email) void fetchMe()
+  }, [token, email, fetchMe])
+
+  return (
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 60 }}>
+      <ImpersonationBanner />
+    </div>
+  )
+}
 
 export function ImpersonationBanner() {
   const email = useAuthStore((s) => s.email)

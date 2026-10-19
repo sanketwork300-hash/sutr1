@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { api, type InvitationPreview } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
+import { StandaloneImpersonationBanner } from '@/components/layout/ImpersonationBanner'
 
 /**
  * Landing page for org invitation links (/join?token=...).
@@ -60,6 +61,7 @@ export default function JoinPage() {
 
   return (
     <div style={pageStyle}>
+      <StandaloneImpersonationBanner />
       <div style={cardStyle}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', margin: '0 0 6px' }}>
           Join organization

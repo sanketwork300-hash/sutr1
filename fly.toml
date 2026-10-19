@@ -24,6 +24,12 @@ primary_region = 'iad'
   POSTHOG_HOST = 'https://d.sutr.sh'
   # Fly's edge proxy is the sole ingress and sets X-Forwarded-For.
   TRUST_PROXY_HEADERS = 'true'
+  # Stored credentials are AES-256-GCM encrypted in the database. The key is
+  # not configuration, it is a secret, so it is set out of band and never here:
+  #   fly secrets set SECRETS_ENCRYPTION_KEY=$(openssl rand -hex 32)
+  # Left unset it is derived from JWT_SECRET_KEY, which then cannot be rotated
+  # without making every stored credential unreadable.
+  SECRETS_BACKEND = 'db_encrypted'
 
 [http_service]
   internal_port = 4747

@@ -12,7 +12,6 @@ from sutr.approvals.requests import (
 )
 from sutr.models.org import Org
 from sutr.models.tool_approval_request import ToolApprovalRequest
-from sutr.models.user import User  # noqa: F401
 
 
 @pytest.fixture(name="db")

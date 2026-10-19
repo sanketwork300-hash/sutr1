@@ -4,7 +4,7 @@ from typing import Union
 
 import httpx
 
-from sutr.integrations.bundled.resend._http import _BASE_URL, response_to_result
+from sutr.integrations.bundled.resend._http import BASE_URL, response_to_result
 from sutr.integrations.types import ApiTool, CustomTool, Param
 
 _PAGINATION_PARAMS = [
@@ -45,7 +45,7 @@ async def _run_get_automation(args: dict, auth_headers: dict) -> dict:
     async with httpx.AsyncClient() as client:
         if automation_id:
             r = await client.get(
-                f"{_BASE_URL}/automations/{automation_id}",
+                f"{BASE_URL}/automations/{automation_id}",
                 headers=auth_headers,
                 timeout=30.0,
             )
@@ -57,7 +57,7 @@ async def _run_get_automation(args: dict, auth_headers: dict) -> dict:
                 if args.get(key) is not None:
                     params[key] = args[key]
             r = await client.get(
-                f"{_BASE_URL}/automations",
+                f"{BASE_URL}/automations",
                 params=params or None,
                 headers=auth_headers,
                 timeout=30.0,
@@ -71,7 +71,7 @@ async def _run_get_automation_runs(args: dict, auth_headers: dict) -> dict:
     async with httpx.AsyncClient() as client:
         if run_id:
             r = await client.get(
-                f"{_BASE_URL}/automations/{automation_id}/runs/{run_id}",
+                f"{BASE_URL}/automations/{automation_id}/runs/{run_id}",
                 headers=auth_headers,
                 timeout=30.0,
             )
@@ -83,7 +83,7 @@ async def _run_get_automation_runs(args: dict, auth_headers: dict) -> dict:
                 if args.get(key) is not None:
                     params[key] = args[key]
             r = await client.get(
-                f"{_BASE_URL}/automations/{automation_id}/runs",
+                f"{BASE_URL}/automations/{automation_id}/runs",
                 params=params or None,
                 headers=auth_headers,
                 timeout=30.0,
@@ -112,7 +112,7 @@ async def _run_manage_events(args: dict, auth_headers: dict) -> dict:
             if args.get("schema"):
                 body["schema"] = args["schema"]
             r = await client.post(
-                f"{_BASE_URL}/events",
+                f"{BASE_URL}/events",
                 json=body,
                 headers=auth_headers,
                 timeout=30.0,
@@ -123,7 +123,7 @@ async def _run_manage_events(args: dict, auth_headers: dict) -> dict:
                 if args.get(key) is not None:
                     params[key] = args[key]
             r = await client.get(
-                f"{_BASE_URL}/events",
+                f"{BASE_URL}/events",
                 params=params or None,
                 headers=auth_headers,
                 timeout=30.0,
@@ -138,7 +138,7 @@ async def _run_manage_events(args: dict, auth_headers: dict) -> dict:
                     "isError": True,
                 }
             r = await client.get(
-                f"{_BASE_URL}/events/{identifier}",
+                f"{BASE_URL}/events/{identifier}",
                 headers=auth_headers,
                 timeout=30.0,
             )
@@ -157,7 +157,7 @@ async def _run_manage_events(args: dict, auth_headers: dict) -> dict:
             if args.get("schema"):
                 body["schema"] = args["schema"]
             r = await client.patch(
-                f"{_BASE_URL}/events/{identifier}",
+                f"{BASE_URL}/events/{identifier}",
                 json=body,
                 headers=auth_headers,
                 timeout=30.0,
@@ -172,7 +172,7 @@ async def _run_manage_events(args: dict, auth_headers: dict) -> dict:
                     "isError": True,
                 }
             r = await client.delete(
-                f"{_BASE_URL}/events/{identifier}",
+                f"{BASE_URL}/events/{identifier}",
                 headers=auth_headers,
                 timeout=30.0,
             )

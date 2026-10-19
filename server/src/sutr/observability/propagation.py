@@ -17,29 +17,24 @@ Two things propagate, and they are deliberately independent:
   provider to parent its spans onto an id that leads nowhere.
 """
 
+import functools
+
 from sutr.request_context import get_correlation_id
 
 CORRELATION_HEADER = "X-Correlation-ID"
 TRACEPARENT_HEADER = "traceparent"
 
-_propagator = None
-_propagator_loaded = False
 
-
+@functools.cache
 def _get_propagator():
     """The W3C propagator, or None when the OpenTelemetry API is not installed."""
-    global _propagator, _propagator_loaded
-    if not _propagator_loaded:
-        _propagator_loaded = True
-        try:
-            from opentelemetry.trace.propagation.tracecontext import (
-                TraceContextTextMapPropagator,
-            )
-        except ImportError:
-            _propagator = None
-        else:
-            _propagator = TraceContextTextMapPropagator()
-    return _propagator
+    try:
+        from opentelemetry.trace.propagation.tracecontext import (
+            TraceContextTextMapPropagator,
+        )
+    except ImportError:
+        return None
+    return TraceContextTextMapPropagator()
 
 
 def extract(headers) -> object | None:

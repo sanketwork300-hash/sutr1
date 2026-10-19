@@ -86,10 +86,12 @@ def _header_map(args: argparse.Namespace) -> dict[str, str]:
 
 
 def _redacted_header_map(args: argparse.Namespace) -> dict[str, str]:
+    # Which credential was sent, never any part of it: probe output gets pasted
+    # into tickets and chat.
     if args.api_key:
-        return {"X-API-Key": f"{args.api_key[:8]}..."}
+        return {"X-API-Key": "[redacted]"}
     if args.bearer_token:
-        return {"Authorization": "Bearer ..."}
+        return {"Authorization": "Bearer [redacted]"}
     return {}
 
 
@@ -213,7 +215,7 @@ def _resolve_org_id(args: argparse.Namespace) -> uuid.UUID | None:
     from sqlmodel import Session, select
 
     from sutr.db import engine
-    from sutr.models.api_key import ApiKey
+    from sutr.models.api_key import ApiKey, hash_api_key
     from sutr.models.org import Org
 
     if args.org_id:
@@ -221,9 +223,7 @@ def _resolve_org_id(args: argparse.Namespace) -> uuid.UUID | None:
 
     with Session(engine) as db:
         if args.api_key:
-            import hashlib
-
-            key_hash = hashlib.sha256(args.api_key.encode()).hexdigest()
+            key_hash = hash_api_key(args.api_key)
             api_key = db.exec(
                 select(ApiKey).where(ApiKey.key_hash == key_hash).where(ApiKey.is_active == True)  # noqa: E712
             ).first()

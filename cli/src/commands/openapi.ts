@@ -1,13 +1,39 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 import { Command } from "commander";
-import { buildHeaders, request } from "../client.js";
-import { readConfig } from "../config.js";
+import { FETCH_REDIRECT, RedirectRefusedError, buildHeaders, isRedirect, request } from "../client.js";
+import { instanceBaseUrl, readConfig } from "../config.js";
 import { print, printError, resolveFormat } from "../output.js";
 
 export const openapiCommand = new Command("openapi").description(
   "Import OpenAPI specifications and compile them into tools",
 );
+
+const DEFAULT_PACKAGE_NAME = "mcp-server.zip";
+
+/**
+ * The output name a `package` download gets when `--out` is not given.
+ *
+ * The server suggests one in Content-Disposition, but that header is whatever
+ * the instance (or anything between it and us) chose to send, so it is only
+ * honoured as a plain zip file name: no directories, no traversal, nothing
+ * that is not a zip. Anything else falls back to the default.
+ */
+export function suggestedZipName(contentDisposition: string): string {
+  const raw = /filename="([^"]+)"/.exec(contentDisposition)?.[1];
+  if (!raw) return DEFAULT_PACKAGE_NAME;
+  const name = basename(raw.replace(/\\/g, "/"));
+  return /^[\w.-]+\.zip$/.test(name) && !name.startsWith(".") ? name : DEFAULT_PACKAGE_NAME;
+}
+
+// Every zip starts with a local file header, or an end-of-central-directory
+// record when it is empty.
+const ZIP_SIGNATURES = [Buffer.from("PK\x03\x04", "latin1"), Buffer.from("PK\x05\x06", "latin1")];
+
+/** The downloaded package is written to disk only if it is a zip archive. */
+export function isZipArchive(data: Buffer): boolean {
+  return ZIP_SIGNATURES.some((signature) => data.subarray(0, 4).equals(signature));
+}
 
 interface ProjectRow {
   id: string;
@@ -371,15 +397,19 @@ openapiCommand
         }
 
         const config = readConfig();
-        const baseUrl = config.url.replace(/\/+$/, "");
+        const baseUrl = instanceBaseUrl(config);
         const res = await fetch(
           `${baseUrl}/api/openapi/${encodeURIComponent(projectId)}/package`,
           {
             method: "POST",
             headers: buildHeaders(config, true),
             body: JSON.stringify(body),
+            redirect: FETCH_REDIRECT,
           },
         );
+        if (isRedirect(res.status)) {
+          throw new RedirectRefusedError(res.status, baseUrl, res.headers.get("location"));
+        }
         if (!res.ok) {
           const json = (await res.json().catch(() => ({}))) as { detail?: unknown };
           printError(
@@ -390,9 +420,12 @@ openapiCommand
           );
         }
         const disposition = res.headers.get("content-disposition") ?? "";
-        const suggested = /filename="([^"]+)"/.exec(disposition)?.[1] ?? "mcp-server.zip";
-        const outPath = opts.out ?? suggested;
-        writeFileSync(outPath, Buffer.from(await res.arrayBuffer()));
+        const outPath = opts.out ?? suggestedZipName(disposition);
+        const archive = Buffer.from(await res.arrayBuffer());
+        if (!isZipArchive(archive)) {
+          printError(`${baseUrl} did not return a zip archive; nothing was written.`, 1);
+        }
+        writeFileSync(outPath, archive);
         console.log(`Wrote ${outPath}`);
         console.log("Unzip it, then: pip install -r requirements.txt && python server.py");
       } catch (e) {

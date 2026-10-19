@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 import httpx
 from sqlmodel import Session
 
-from sutr.credentials.read import list_credentials
+from sutr.credentials.read import list_credentials, secret_ref
 from sutr.models.integration_credential import (
     KIND_AUTHORIZATION_CODE,
     KIND_BASIC,
@@ -178,7 +178,9 @@ async def client_credentials_token(
         session,
         org_id=credential.org_id,
         kind=f"integration_access_token:{credential.integration_id}:{credential.scheme_name}",
-        ref=f"{credential.integration_id}:{credential.scheme_name}:access_token",
+        ref=secret_ref(
+            credential.org_id, credential.integration_id, credential.scheme_name, "access_token"
+        ),
         value=token,
         secret_id=credential.access_token_secret_id,
     )

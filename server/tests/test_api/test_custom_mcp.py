@@ -5,6 +5,8 @@ user-supplied MCP URL could point the server at cloud metadata or internal
 services.
 """
 
+import contextlib
+
 import pytest
 
 from sutr.mcp.client import _ensure_safe_upstream
@@ -23,10 +25,9 @@ def _public_dns(monkeypatch):
     real_getaddrinfo = socket_module.getaddrinfo
 
     def fake_resolve(hostname: str, port: int):
-        try:
-            real_getaddrinfo(hostname, port)  # keep literals working
-        except OSError:
-            pass
+        # Keep literals working; an unresolvable fake hostname is expected here.
+        with contextlib.suppress(OSError):
+            real_getaddrinfo(hostname, port)
         import ipaddress
 
         try:

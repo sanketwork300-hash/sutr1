@@ -35,6 +35,7 @@ from sutr.models.registry_tool import (
     ACTIVE,
     ARCHIVED,
     PUBLISHED,
+    VISIBILITY_ORGANIZATION,
     VISIBILITY_PRIVATE,
     RegistryTool,
 )
@@ -123,10 +124,18 @@ def list_for_provider(session: Session, provider_org_id: uuid.UUID) -> list[Tool
     )
 
 
-def subscribable(tool: RegistryTool) -> tuple[bool, str | None]:
-    """Whether a tool can be subscribed to, and why not when it cannot."""
+def subscribable(tool: RegistryTool, subscriber_org_id: uuid.UUID) -> tuple[bool, str | None]:
+    """Whether `subscriber_org_id` may subscribe to this tool, and why not.
+
+    Visibility is checked against the subscriber, not in the abstract: an
+    `organization` tool is one the listings hide from every other tenant, and a
+    subscribe path that forgot who was asking would let any tenant that
+    guessed the id subscribe to it anyway.
+    """
     if tool.visibility == VISIBILITY_PRIVATE:
         return False, "This tool is private to its provider."
+    if tool.visibility == VISIBILITY_ORGANIZATION and tool.org_id != subscriber_org_id:
+        return False, "This tool is visible only inside the organization that owns it."
     if tool.lifecycle_state == ARCHIVED:
         return False, "This tool has been archived."
     if tool.lifecycle_state not in SUBSCRIBABLE_STATES:
@@ -145,7 +154,7 @@ def subscribe(
     subscribed_by_user_id: uuid.UUID | None = None,
 ) -> ToolSubscription:
     """Subscribe. The caller commits."""
-    allowed, reason = subscribable(tool)
+    allowed, reason = subscribable(tool, org_id)
     if not allowed:
         raise ConflictError(reason or "This tool cannot be subscribed to.")
     if org_id == tool.org_id:

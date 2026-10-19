@@ -13,10 +13,14 @@ image:
   pullPolicy: IfNotPresent
   pullSecrets: []
 
-# The Secret that holds DATABASE_URL and JWT_SECRET_KEY. Required, and created
-# outside this chart — by an operator, an external-secrets controller, or
-# Vault. Every replica must read the *same* JWT_SECRET_KEY or sessions issued
-# by one replica are rejected by the next.
+# The Secret that holds DATABASE_URL, JWT_SECRET_KEY and SECRETS_ENCRYPTION_KEY.
+# Required, and created outside this chart — by an operator, an
+# external-secrets controller, or Vault. Every replica must read the *same*
+# JWT_SECRET_KEY or sessions issued by one replica are rejected by the next,
+# and the same SECRETS_ENCRYPTION_KEY (32 bytes, hex or base64) or a
+# credential stored by one replica cannot be read by another. Leaving
+# SECRETS_ENCRYPTION_KEY out derives it from JWT_SECRET_KEY, which then cannot
+# be rotated without making every stored credential unreadable.
 existingSecret: ""
 
 api:
@@ -88,6 +92,10 @@ ingress:
 # Plain configuration. Anything secret belongs in `existingSecret`.
 config:
   BASE_URL: ""
+  # How stored credentials are kept: db_encrypted (AES-256-GCM in the
+  # database, keyed by SECRETS_ENCRYPTION_KEY from `existingSecret`), db_kms
+  # or vault. "db" is plaintext and is refused on a cloud install.
+  SECRETS_BACKEND: "db_encrypted"
   LOG_FORMAT: "json"
   REGION: ""
   # "active" or "standby". A standby serves reads and refuses writes; see

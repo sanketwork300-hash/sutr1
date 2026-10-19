@@ -83,6 +83,31 @@ async def test_the_graph_is_returned_for_a_document(client):
     assert body["edges"]
 
 
+async def test_the_graph_can_be_walked_from_one_node(client):
+    data = await _upload(client)
+    whole = (
+        await client.get(f"/v1/documentation/graph?document_id={data['document']['id']}")
+    ).json()["data"]
+    connected = {edge["source"] for edge in whole["edges"]}
+    start = next(node for node in whole["nodes"] if node["id"] in connected)
+
+    response = await client.get(
+        "/v1/documentation/graph",
+        params={"entity_type": start["entity_type"], "entity_key": start["entity_key"]},
+    )
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert start["id"] in {node["id"] for node in body["nodes"]}
+    assert any(start["id"] in (edge["source"], edge["target"]) for edge in body["edges"])
+
+
+async def test_walking_from_an_unknown_node_is_not_found(client):
+    response = await client.get(
+        "/v1/documentation/graph", params={"entity_type": "term", "entity_key": "nothing-here"}
+    )
+    assert response.status_code == 404
+
+
 async def test_search_says_which_mode_it_ran_in(client):
     await _upload(client)
     response = await client.get("/v1/documentation/search?q=refund within 30 days")

@@ -15,6 +15,7 @@ import io
 import json
 import uuid
 import zipfile
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
@@ -329,7 +330,7 @@ async def test_azure_uploads_a_tar_not_the_zip(patch_http):
     await AzureProvider().deploy(_spec(AZURE_TARGET))
 
     for (_method, url), body in zip(recorder.calls, recorder.bodies):
-        if "blob.core.windows.net" in url:
+        if urlsplit(url).hostname.endswith(".blob.core.windows.net"):
             assert body.startswith(b"\x1f\x8b")  # gzip magic
             break
     else:
@@ -342,7 +343,7 @@ async def test_azure_sends_no_bearer_token_to_the_sas_upload_url(patch_http):
     seen = {}
 
     def handler(request):
-        if "blob.core.windows.net" in str(request.url):
+        if request.url.host.endswith(".blob.core.windows.net"):
             seen["auth"] = request.headers.get("authorization")
         for match, response in _azure_routes():
             if match in str(request.url):

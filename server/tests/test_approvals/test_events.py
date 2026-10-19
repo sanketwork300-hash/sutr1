@@ -30,9 +30,7 @@ async def test_wait_returns_approved_when_notified():
         await asyncio.sleep(0.01)
         events.notify_decision(request_id, "approved")
 
-    notify_task = asyncio.create_task(notifier())
-    status = await events.wait_for_decision(request_id, timeout=1.0)
-    await notify_task
+    status, _ = await asyncio.gather(events.wait_for_decision(request_id, timeout=1.0), notifier())
 
     assert status == "approved"
     # Cleanup: no stale entries left behind.
@@ -49,9 +47,7 @@ async def test_wait_returns_denied_when_notified():
         await asyncio.sleep(0.01)
         events.notify_decision(request_id, "denied")
 
-    notify_task = asyncio.create_task(notifier())
-    status = await events.wait_for_decision(request_id, timeout=1.0)
-    await notify_task
+    status, _ = await asyncio.gather(events.wait_for_decision(request_id, timeout=1.0), notifier())
 
     assert status == "denied"
     assert request_id not in events._events
@@ -98,9 +94,10 @@ async def test_pre_check_pending_falls_through_to_wait():
         await asyncio.sleep(0.01)
         events.notify_decision(request_id, "approved")
 
-    notify_task = asyncio.create_task(notifier())
-    status = await events.wait_for_decision(request_id, timeout=1.0, pre_check=lambda: "pending")
-    await notify_task
+    status, _ = await asyncio.gather(
+        events.wait_for_decision(request_id, timeout=1.0, pre_check=lambda: "pending"),
+        notifier(),
+    )
 
     assert status == "approved"
 
@@ -151,7 +148,7 @@ async def test_cancelled_waiter_cleans_up_refcount():
 
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
-        await task
+        await asyncio.wait_for(task, timeout=1.0)
 
     # Cleanup on cancel.
     assert request_id not in events._events

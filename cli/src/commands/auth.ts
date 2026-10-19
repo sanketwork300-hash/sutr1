@@ -1,5 +1,12 @@
 import { Command } from "commander";
-import { readConfig, writeConfig, maskKey, clearCredentials } from "../config.js";
+import {
+  clearCredentials,
+  credentialHeaderValue,
+  instanceBaseUrl,
+  maskKey,
+  readConfig,
+  writeConfig,
+} from "../config.js";
 import { request } from "../client.js";
 import { print, printError, resolveFormat } from "../output.js";
 
@@ -14,6 +21,11 @@ authCommand
   .option("-o, --output <format>", "Output format")
   .action((url: string, opts: { output: string }) => {
     const format = resolveFormat(opts.output);
+    try {
+      instanceBaseUrl({ url });
+    } catch (e) {
+      printError((e as Error).message, 1);
+    }
     const config = readConfig();
     clearCredentials(config);
     config.url = url;
@@ -41,6 +53,12 @@ authCommand
         "ap auth login now requires --api-key. Create one in the web UI under Develop → API Keys.",
         1,
       );
+    }
+
+    try {
+      credentialHeaderValue(opts.apiKey);
+    } catch (e) {
+      printError((e as Error).message, 1);
     }
 
     const config = readConfig();

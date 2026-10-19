@@ -42,10 +42,18 @@ class User(SQLModel, table=True):
 
     # TOTP (authenticator app) secondary factor. Secret persists across disable so
     # re-enabling does not require a fresh setup flow.
+    #
+    # The seed lives in the secrets backend (`totp_secret_id` -> secret.id).
+    # `totp_secret` is the legacy plaintext column: read as a fallback and
+    # moved into the secrets backend the next time the user verifies a code.
     totp_secret: str | None = Field(default=None)
+    totp_secret_id: uuid.UUID | None = Field(default=None, foreign_key="secret.id")
     totp_enabled: bool = Field(default=False)
     totp_confirmed_at: datetime | None = Field(default=None)
     totp_recovery_codes_hash_json: str | None = Field(default=None)
+    # RFC 6238 §5.2: a time step that already authenticated the user must not
+    # be accepted again. Stored as the integer step counter.
+    totp_last_used_step: int | None = Field(default=None)
 
     # Incremented on password change/reset to invalidate all outstanding JWTs
     # for this user. Tokens carry the value as the "tv" claim (absent = 0).

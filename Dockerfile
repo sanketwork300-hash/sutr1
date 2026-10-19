@@ -48,7 +48,7 @@ RUN uv sync --frozen --no-dev --extra postgres --extra aws
 COPY --from=ui-builder /app/ui/dist ./ui_dist
 
 # Volume mount point for SQLite data.
-RUN mkdir -p /data
+RUN mkdir -p /data /secrets
 
 COPY server/start.sh ./start.sh
 RUN chmod +x ./start.sh
@@ -61,7 +61,7 @@ RUN chmod +x ./start.sh
 # uid 1000 specifically, because that is the number the chart's securityContext
 # names; the two have to agree or the volume is owned by the wrong user.
 RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin sutr \
- && chown -R sutr:sutr /app /data
+ && chown -R sutr:sutr /app /data /secrets
 USER sutr
 
 EXPOSE 4747

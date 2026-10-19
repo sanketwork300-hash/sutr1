@@ -53,6 +53,17 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Drop trailing slashes with a scan rather than `/\/+$/`: the regex backtracks
+ * quadratically on a long run of slashes not at the end, and the base URL is
+ * caller- or environment-supplied.
+ */
+function stripTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url.charCodeAt(end - 1) === 47 /* "/" */) end--;
+  return url.slice(0, end);
+}
+
 function detailMessage(body: unknown, status: number): string {
   if (body && typeof body === 'object') {
     const record = body as Record<string, unknown>;
@@ -153,7 +164,7 @@ export class Sutr {
       );
     }
 
-    this.baseUrl = (options.baseUrl ?? env.SUTR_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
+    this.baseUrl = stripTrailingSlashes(options.baseUrl ?? env.SUTR_BASE_URL ?? DEFAULT_BASE_URL);
     this.headers = { Accept: 'application/json', 'User-Agent': USER_AGENT };
     if (apiKey) this.headers['X-API-Key'] = apiKey;
     else if (accessToken) this.headers.Authorization = `Bearer ${accessToken}`;

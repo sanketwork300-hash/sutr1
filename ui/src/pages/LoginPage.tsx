@@ -6,6 +6,7 @@ import { BrandLockup } from '@/components/shell/BrandMark'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ApiError, api, type EmailVerificationRequiredDetail } from '@/api/client'
+import { safeInternalPath } from '@/lib/safeRedirect'
 import { useMediaQuery } from '@/lib/useMediaQuery'
 import { useAuthStore } from '@/stores/auth'
 import { useEmailVerificationStore } from '@/stores/emailVerification'
@@ -43,7 +44,10 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [totpStep, setTotpStep] = useState(false)
   const [totpCode, setTotpCode] = useState('')
+  // Only a path on this origin is ever navigated to; anything else becomes /app.
   const redirect = searchParams.get('redirect')
+    ? safeInternalPath(searchParams.get('redirect'))
+    : null
   const signupHref = redirect ? `/signup?redirect=${encodeURIComponent(redirect)}` : '/signup'
   const googleError = searchParams.get('google_error')
 
@@ -55,7 +59,7 @@ export default function LoginPage() {
       const res = await api.auth.login(email, password, totpCode || undefined)
       clearPendingVerification()
       setAuth(res.access_token)
-      navigate(redirect || '/app')
+      navigate(safeInternalPath(redirect))
     } catch (err) {
       const verificationDetail = getVerificationDetail(err)
       if (verificationDetail) {

@@ -2,10 +2,24 @@ from sutr.config import settings
 from sutr.secrets.base import SecretsBackend, StoredSecret
 from sutr.secrets.db import DBSecretsBackend
 
+SUPPORTED = ("db_encrypted", "db", "db_kms", "vault")
+
 
 def _build_backend() -> SecretsBackend:
     backend = settings.secrets_backend
+    if backend == "db_encrypted":
+        from sutr.secrets.local import LocalEncryptedSecretsBackend
+
+        return LocalEncryptedSecretsBackend()
     if backend == "db":
+        if settings.is_cloud:
+            # A multi-tenant install that keeps every tenant's upstream
+            # credentials in plaintext is not a configuration, it is an
+            # incident waiting for a backup to leak. Refuse at startup.
+            raise RuntimeError(
+                "SECRETS_BACKEND=db stores credentials in plaintext and is refused when "
+                "IS_CLOUD is set. Use db_encrypted (the default), db_kms or vault."
+            )
         return DBSecretsBackend()
     if backend == "db_kms":
         from sutr.secrets.kms import DBKMSSecretsBackend
@@ -18,7 +32,7 @@ def _build_backend() -> SecretsBackend:
         from sutr.secrets.vault import VaultSecretsBackend
 
         return VaultSecretsBackend()
-    raise ValueError(f"Unknown SECRETS_BACKEND '{backend}'. Supported: db, db_kms, vault")
+    raise ValueError(f"Unknown SECRETS_BACKEND '{backend}'. Supported: {', '.join(SUPPORTED)}")
 
 
 secrets_backend: SecretsBackend = _build_backend()

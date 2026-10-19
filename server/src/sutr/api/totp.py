@@ -16,6 +16,7 @@ from sqlmodel import Session
 
 from sutr.analytics import posthog_client
 from sutr.api.schemas import MessageResponse
+from sutr.api.second_factor import verify_second_factor_or_raise
 from sutr.db import get_session
 from sutr.dependencies import get_current_user, get_impersonator
 from sutr.models.user import User
@@ -23,10 +24,11 @@ from sutr.services.audit import record_user_security_audit
 from sutr.totp import (
     generate_recovery_codes,
     generate_secret,
+    has_totp_secret,
     hash_recovery_codes,
     otpauth_uri,
     qr_data_url,
-    verify_second_factor,
+    store_totp_secret,
     verify_totp_code,
 )
 
@@ -53,24 +55,13 @@ class TotpCodeRequest(BaseModel):
     code: str
 
 
-def _require_existing_second_factor(user: User, code: str | None) -> None:
-    """Require a valid authenticator or recovery code for sensitive changes."""
-    if not code:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "error": "totp_required",
-                "message": "A one-time code is required to confirm this action.",
-            },
-        )
-    if not verify_second_factor(user, code):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "error": "totp_invalid",
-                "message": "That code didn't match — try again with a fresh one.",
-            },
-        )
+def _require_existing_second_factor(session: Session, user: User, code: str | None) -> None:
+    """Require a valid authenticator or recovery code for sensitive changes.
+
+    Unlike `require_second_factor` this does not look at `totp_enabled`: the
+    disable and re-enable flows run precisely while that flag is being flipped.
+    Failures count against the account lockout like every other gate."""
+    verify_second_factor_or_raise(session, user, code)
 
 
 def _reject_if_impersonating(impersonator: User | None) -> None:
@@ -120,10 +111,11 @@ def setup(
 
     secret = generate_secret()
     recovery_codes = generate_recovery_codes()
-    current_user.totp_secret = secret
+    store_totp_secret(session, current_user, secret)
     current_user.totp_recovery_codes_hash_json = hash_recovery_codes(recovery_codes)
     current_user.totp_enabled = False
     current_user.totp_confirmed_at = None
+    current_user.totp_last_used_step = None
     session.add(current_user)
     session.commit()
 
@@ -145,10 +137,10 @@ def enable(
 ) -> TotpStatusResponse:
     """Confirm the setup by verifying a first code from the authenticator."""
     _reject_if_impersonating(impersonator)
-    if not current_user.totp_secret:
+    if not has_totp_secret(current_user):
         raise HTTPException(status_code=400, detail="No pending TOTP setup — call /setup first")
 
-    if not verify_totp_code(current_user.totp_secret, body.code):
+    if not verify_totp_code(session, current_user, body.code):
         raise HTTPException(status_code=400, detail="Invalid code — try again")
 
     is_first_confirmation = current_user.totp_confirmed_at is None
@@ -181,13 +173,13 @@ def re_enable(
     Re-enabling still requires proof of possession of the current authenticator
     or an unused recovery code."""
     _reject_if_impersonating(impersonator)
-    if current_user.totp_confirmed_at is None or not current_user.totp_secret:
+    if current_user.totp_confirmed_at is None or not has_totp_secret(current_user):
         raise HTTPException(
             status_code=409,
             detail="No previously configured authenticator — call /setup instead",
         )
 
-    _require_existing_second_factor(current_user, body.code)
+    _require_existing_second_factor(session, current_user, body.code)
     current_user.totp_enabled = True
     session.add(current_user)
     record_user_security_audit(
@@ -215,7 +207,7 @@ def disable(
     _reject_if_impersonating(impersonator)
     if not current_user.totp_enabled:
         return MessageResponse(message="Two-factor authentication is already disabled")
-    _require_existing_second_factor(current_user, body.code)
+    _require_existing_second_factor(session, current_user, body.code)
     current_user.totp_enabled = False
     session.add(current_user)
     record_user_security_audit(

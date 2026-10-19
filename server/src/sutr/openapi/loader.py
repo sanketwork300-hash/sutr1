@@ -7,7 +7,7 @@ import yaml
 
 from sutr.openapi.errors import OpenAPIError
 from sutr.openapi.limits import MAX_SPEC_BYTES, URL_FETCH_TIMEOUT_SECONDS
-from sutr.upstream_safety import UnsafeUpstreamUrlError, validate_safe_url
+from sutr.upstream_safety import UnsafeUpstreamUrlError, pinned_request_target
 
 
 def parse_spec_text(text: str) -> dict:
@@ -44,24 +44,29 @@ async def fetch_spec_from_url(url: str, headers: dict[str, str] | None = None) -
     """Fetch a spec over HTTP with SSRF screening and a size cap.
 
     The URL is untrusted user input: loopback/private/link-local targets are
-    rejected, redirects are not followed (a redirect could bounce to an
-    internal address, and would also carry any credential in `headers` there),
-    and the body is streamed with a hard byte limit.
+    rejected, the connection is pinned to the address that passed that check
+    (so the name cannot answer differently when httpx would resolve it again),
+    redirects are not followed (a redirect could bounce to an internal
+    address, and would also carry any credential in `headers` there), and the
+    body is streamed with a hard byte limit.
 
     `headers` carries source-specific credentials (a GitHub token, a SwaggerHub
     API key). Callers must only pass them for URLs they have already pinned to
     that provider's host — see `openapi/sources.py`.
     """
     try:
-        validate_safe_url(url)
+        target = pinned_request_target(url)
     except UnsafeUpstreamUrlError as exc:
         raise OpenAPIError("unsafe_url", f"Unsafe specification URL: {exc}")
 
+    request_headers = {**(headers or {}), **target.headers}
     try:
         async with httpx.AsyncClient(
             timeout=URL_FETCH_TIMEOUT_SECONDS, follow_redirects=False
         ) as client:
-            async with client.stream("GET", url, headers=headers) as response:
+            async with client.stream(
+                "GET", target.url, headers=request_headers, extensions=target.extensions
+            ) as response:
                 if response.status_code >= 400:
                     raise OpenAPIError(
                         "fetch_failed",

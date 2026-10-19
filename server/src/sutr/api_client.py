@@ -10,6 +10,7 @@ import time
 import httpx
 from sqlmodel import Session
 
+from sutr.config import settings
 from sutr.db import engine
 from sutr.integrations.types import ApiTool, CustomIntegration, CustomTool, Param, TokenAuth
 from sutr.models.integration import InstalledIntegration
@@ -22,7 +23,12 @@ from sutr.resilience.timeouts import provider_timeout
 from sutr.runtime import request_builder
 from sutr.secrets.records import get_secret_value
 from sutr.token_auth import build_token_auth_headers
-from sutr.upstream_safety import UnsafeUpstreamUrlError, validate_safe_url
+from sutr.upstream_safety import UnsafeUpstreamUrlError, pinned_request_target
+
+# A tenant-authored tool can carry an arbitrary argument into a request body.
+# Four MiB is far above any sane API call and far below what would hurt the
+# worker that has to encode it.
+DEFAULT_MAX_REQUEST_BODY_BYTES = 4 * 1024 * 1024
 
 # ---------------------------------------------------------------------------
 # Auth helpers
@@ -149,14 +155,21 @@ def _result_from_response(
 ) -> dict:
     text = _decode_response_body(response, body)
     if truncated:
+        # The body was cut off at the cap, so what was read is not the
+        # provider's answer and must not be passed off as one. The result says
+        # so in words an agent will read and in a flag a program can check.
         return {
             "content": [
                 {
                     "type": "text",
-                    "text": "API response exceeded the maximum allowed response size.",
+                    "text": (
+                        "API response was truncated: it exceeded the maximum allowed "
+                        f"response size of {len(body)} bytes and was not returned."
+                    ),
                 }
             ],
             "isError": True,
+            "truncated": True,
             "status_code": response.status_code,
             "duration_ms": duration_ms,
         }
@@ -166,6 +179,7 @@ def _result_from_response(
         try:
             error_text = json.dumps(json.loads(text))
         except Exception:
+            # Not JSON: the raw body is already in error_text and is reported as is.
             pass
         return {
             "content": [
@@ -251,11 +265,16 @@ async def dispatch_api_tool(
             "duration_ms": 0,
         }
 
-    # Re-validate the full URL at dispatch time. The base URL was checked when
-    # the integration was saved, but the hostname's DNS records may have
-    # changed (or been crafted) to point at internal IPs since then.
+    # Re-validate the full URL at dispatch time, and pin the connection to the
+    # address that passed. The base URL was checked when the integration was
+    # saved, but the hostname's DNS records may have changed (or been crafted)
+    # to point at internal IPs since then — and a name that answers a public
+    # address to the check and a private one to the connect is the same
+    # attack one step later, so the request goes to the vetted IP literal with
+    # the original hostname carried in `Host` and in TLS (SNI and certificate
+    # verification).
     try:
-        validate_safe_url(request["url"], allow_query=True)
+        target = pinned_request_target(request["url"], allow_query=True)
     except UnsafeUpstreamUrlError as exc:
         return {
             "content": [{"type": "text", "text": f"Unsafe upstream URL: {exc}"}],
@@ -306,12 +325,20 @@ async def dispatch_api_tool(
             "server.address": httpx.URL(request["url"]).host,
         },
     ) as active_span:
+        # The request as the standalone runtime would send it, re-addressed to
+        # the pinned IP. Only the connection target changes: path, query,
+        # body and auth are untouched, and the Host header names the real
+        # host so virtual hosting and TLS still see the hostname they expect.
+        send_kwargs = request_builder.request_kwargs(request)
+        send_kwargs["url"] = target.url
+        send_kwargs["headers"] = {**send_kwargs["headers"], **target.headers}
+        send_kwargs["extensions"] = target.extensions
 
         async def attempt():
             async with httpx.AsyncClient(
                 timeout=_timeout_policy(timeout), follow_redirects=follow_redirects
             ) as client:
-                async with client.stream(**request_builder.request_kwargs(request)) as response:
+                async with client.stream(**send_kwargs) as response:
                     body, truncated = await _read_response_body(response, max_response_bytes)
                     return response, body, truncated
 
@@ -390,6 +417,8 @@ async def call_tool(
     integration: CustomIntegration | None = None,
     auth_headers: dict[str, str] | None = None,
     credentials: list[dict] | None = None,
+    max_response_bytes: int | None = None,
+    max_request_body_bytes: int | None = DEFAULT_MAX_REQUEST_BODY_BYTES,
 ) -> dict:
     """Execute a tool call and return an MCP-compatible result dict.
 
@@ -397,7 +426,14 @@ async def call_tool(
     (ADR-009): API keys in query strings or cookies, several schemes at once,
     and OAuth2 client-credentials tokens the platform obtained itself. It is
     resolved by the caller so this function stays free of database access.
+
+    `max_response_bytes` caps how much of the upstream body is buffered; it
+    defaults to `settings.tool_response_max_bytes`. The upstream host is
+    tenant-controlled, and a body with no ceiling is a body that can take the
+    worker, and every other tenant on it, down with one response.
     """
+    if max_response_bytes is None:
+        max_response_bytes = settings.tool_response_max_bytes
     headers = (
         auth_headers
         if auth_headers is not None
@@ -413,4 +449,6 @@ async def call_tool(
         args=args,
         headers=headers,
         credentials=credentials,
+        max_request_body_bytes=max_request_body_bytes,
+        max_response_bytes=max_response_bytes,
     )

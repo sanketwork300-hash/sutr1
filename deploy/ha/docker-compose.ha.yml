@@ -33,6 +33,12 @@ x-api-environment: &api-environment
   # is that replica count and connection count stop being the same number.
   DATABASE_URL: "postgresql+psycopg2://sutr:${POSTGRES_PASSWORD:-sutr}@pgbouncer:6432/sutr"
   JWT_SECRET_KEY: "${JWT_SECRET_KEY:?set JWT_SECRET_KEY — every replica must use the same one}"
+  # Stored credentials are encrypted at rest (AES-256-GCM) with this key: 32
+  # bytes, hex or base64, the same on every replica. Left empty it is derived
+  # from JWT_SECRET_KEY, which then cannot be rotated without re-keying every
+  # stored credential — so set it: openssl rand -hex 32
+  SECRETS_BACKEND: "db_encrypted"
+  SECRETS_ENCRYPTION_KEY: "${SECRETS_ENCRYPTION_KEY:-}"
   BASE_URL: "${BASE_URL:-http://localhost:8080}"
   UI_BASE_URL: "${BASE_URL:-http://localhost:8080}"
   IS_SELF_HOSTED: "true"

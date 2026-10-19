@@ -117,7 +117,10 @@ async def test_invite_accept_signup_flow(client, session, test_org):
 
     new_user = session.exec(select(User).where(User.email == "newbie@example.com")).first()
     assert new_user is not None
-    assert new_user.email_verified is True
+    # No email backend in tests: the link was handed over out-of-band (it is
+    # in the response above), so possession of it proves nothing about the
+    # mailbox and the account must verify its email like any other signup.
+    assert new_user.email_verified is False
     membership = session.get(OrgMembership, (new_user.id, test_org.id))
     assert membership is not None and membership.role == "developer"
 

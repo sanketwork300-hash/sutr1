@@ -39,7 +39,8 @@ class EventBus(Protocol):
     def available(self) -> tuple[bool, str | None]:
         """(usable, reason-if-not) — reported by /v1/platform/capabilities."""
 
-    def close(self) -> None: ...
+    def close(self) -> None:
+        """Release any connection the bus holds."""
 
 
 class InProcessBus:

@@ -26,7 +26,7 @@ from sutr.common.errors import ConflictError, NotFoundError
 from sutr.db import get_session
 from sutr.dependencies import AgentAuth, get_agent_auth
 from sutr.marketplace import listings, profiles, projection, subscriptions
-from sutr.models.registry_tool import RegistryTool
+from sutr.models.registry_tool import VISIBILITY_PUBLIC, RegistryTool
 from sutr.services.audit import actor_from_agent_auth, record_audit
 
 router = APIRouter(prefix="/v1/marketplace", tags=["marketplace"])
@@ -190,12 +190,15 @@ def subscribe(
     tool = session.get(RegistryTool, body.tool_id)
     if tool is None:
         raise NotFoundError("That tool is not in the registry.")
-    # A private tool is invisible, so "not found" is the honest answer rather
-    # than "you may not subscribe" — which would confirm it exists.
-    allowed, reason = subscriptions.subscribable(tool)
-    if not allowed and tool.visibility == "private":
+    # A tool this tenant cannot see — private, or visible only inside the
+    # organization that owns it — reads as "not found" rather than "you may
+    # not subscribe": a 403, or a 409 naming its lifecycle state, would confirm
+    # that it exists and say how far along it is.
+    allowed, reason = subscriptions.subscribable(tool, agent_auth.org.id)
+    foreign = tool.org_id != agent_auth.org.id
+    if foreign and tool.visibility != VISIBILITY_PUBLIC:
         raise NotFoundError("That tool is not in the registry.")
-    if not allowed and tool.org_id != agent_auth.org.id:
+    if not allowed and foreign:
         raise ConflictError(reason or "This tool cannot be subscribed to.")
 
     subscription = subscriptions.subscribe(

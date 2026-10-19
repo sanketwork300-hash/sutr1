@@ -26,7 +26,7 @@ from sutr.integrations import registry
 from sutr.models.integration import InstalledIntegration
 from sutr.models.oauth import OAuthState
 from sutr.secrets.records import delete_secret, upsert_secret
-from sutr.upstream_safety import validate_safe_url
+from sutr.upstream_safety import UnsafeUpstreamUrlError, validate_safe_url
 
 
 def _pkce_pair() -> tuple[str, str]:
@@ -187,10 +187,24 @@ async def start_oauth_for_installed(
     # requests (probe, PRM, AS metadata, DCR), so screen the origin before any
     # of them. Bundled integrations use vendor-constant URLs and are exempt.
     # Raises UnsafeUpstreamUrlError (a ValueError → HTTP 400 at the router).
-    if integration_id.startswith(registry.CUSTOM_PREFIX):
-        validate_safe_url(server_url)
+    #
+    # The screen applies to every URL discovery *produces* as well as the one
+    # it starts from: the resource-metadata hint, the authorization server,
+    # and the authorization, token and registration endpoints all come from
+    # responses the remote end wrote, and each one is somewhere this server
+    # is about to send a request.
+    is_custom = integration_id.startswith(registry.CUSTOM_PREFIX)
 
-    async with httpx.AsyncClient(follow_redirects=True) as http:
+    def screen(url: str) -> str:
+        if is_custom:
+            validate_safe_url(url)
+        return url
+
+    screen(server_url)
+
+    # Redirects are not followed: a screened host answering with a `Location`
+    # on an unscreened one is the same SSRF one hop later.
+    async with httpx.AsyncClient(follow_redirects=False) as http:
         # Step 1: Probe MCP endpoint to get WWW-Authenticate resource_metadata hint
         www_auth_resource_url: str | None = None
         try:
@@ -198,6 +212,8 @@ async def start_oauth_for_installed(
             if probe.status_code == 401:
                 www_auth_resource_url = _extract_resource_metadata_url(probe)
         except Exception:
+            # The probe only yields an optional hint; without it discovery
+            # falls back to the well-known URLs derived from server_url.
             pass
 
         # Step 2: Discover Protected Resource Metadata (RFC 9728)
@@ -209,13 +225,15 @@ async def start_oauth_for_installed(
         prm = None
         for url in prm_urls:
             try:
-                resp = await http.send(create_oauth_metadata_request(url))
+                resp = await http.send(create_oauth_metadata_request(screen(url)))
                 prm = await handle_protected_resource_response(resp)
                 if prm:
-                    auth_server_url = str(prm.authorization_servers[0])
+                    auth_server_url = screen(str(prm.authorization_servers[0]))
                     if prm.scopes_supported:
                         scope = " ".join(prm.scopes_supported)
                     break
+            except UnsafeUpstreamUrlError:
+                raise
             except Exception:
                 continue
 
@@ -226,7 +244,7 @@ async def start_oauth_for_installed(
         asm = None
         for url in asm_urls:
             try:
-                resp = await http.send(create_oauth_metadata_request(url))
+                resp = await http.send(create_oauth_metadata_request(screen(url)))
                 ok, asm = await handle_auth_metadata_response(resp)
                 if asm:
                     if scope is None and asm.scopes_supported:
@@ -234,14 +252,18 @@ async def start_oauth_for_installed(
                     break
                 if not ok:
                     break
+            except UnsafeUpstreamUrlError:
+                raise
             except Exception:
                 continue
 
         if not asm or not asm.authorization_endpoint or not asm.token_endpoint:
             raise ValueError("Failed to discover OAuth endpoints for this integration")
 
-        authorization_endpoint = str(asm.authorization_endpoint)
-        token_endpoint = str(asm.token_endpoint)
+        authorization_endpoint = screen(str(asm.authorization_endpoint))
+        token_endpoint = screen(str(asm.token_endpoint))
+        if asm.registration_endpoint:
+            screen(str(asm.registration_endpoint))
 
         # Step 4: Dynamic Client Registration
         oauth_state = session.exec(
@@ -260,6 +282,7 @@ async def start_oauth_for_installed(
         parsed = urlparse(server_url)
         auth_base_url = f"{parsed.scheme}://{parsed.netloc}"
         reg_request = create_client_registration_request(asm, client_metadata, auth_base_url)
+        screen(str(reg_request.url))
         try:
             reg_resp = await http.send(reg_request)
             client_info = await handle_registration_response(reg_resp)

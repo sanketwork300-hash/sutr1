@@ -186,6 +186,8 @@ class DockerProvider(DeploymentProvider):
         try:
             await self._run(*args)
         except ProviderError:
+            # Callers use this for cleanup where failure (e.g. the container
+            # is already gone) is expected and not worth surfacing.
             pass
 
     async def status(self, state: dict, target: ProviderTarget) -> ProviderStatus:

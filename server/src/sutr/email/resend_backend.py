@@ -3,6 +3,7 @@ import logging
 import resend
 
 from sutr.email.backend import EmailBackend
+from sutr.observability.log_safety import single_line
 
 logger = logging.getLogger(__name__)
 
@@ -21,4 +22,4 @@ class ResendBackend(EmailBackend):
                 "html": html,
             }
         )
-        logger.info("Email sent to %s: %s", to, subject)
+        logger.info("Email sent to %s: %s", single_line(to), single_line(subject))

@@ -334,3 +334,23 @@ def test_an_approved_exception_becomes_a_measured_violation(
     assert violations.value > 0, "an approved exception carries risk"
     assert violations.detail["open_exceptions"] == 1
     assert after.coverage > before.coverage
+
+
+def test_an_unidentified_decider_cannot_decide_a_review(
+    session, test_org, tool, test_user, validated_version, clean_compliance
+):
+    """L5: an API key yields no decider; that is ineligibility, not exemption."""
+    record = review.open_review(session, tool=tool, requested_by_user_id=test_user.id)
+    with pytest.raises(ForbiddenError, match="identified user"):
+        review.decide(session, record, approve=True, decided_by_user_id=None)
+    assert record.state == "open"
+
+
+def test_an_unidentified_decider_cannot_decide_an_exception(session, test_org, test_user):
+    record = _request(session, test_org, test_user)
+    exceptions.assess(session, record, assessment={"score": 1})
+    session.commit()
+    for approve in (True, False):
+        with pytest.raises(ForbiddenError, match="identified user"):
+            exceptions.decide(session, record, approve=approve, decided_by_user_id=None)
+    assert record.state == "requested"

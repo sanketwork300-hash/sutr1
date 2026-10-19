@@ -342,10 +342,11 @@ class _OrgClient:
     cross-tenant test exists to catch and would instead be committing.
     """
 
-    def __init__(self, client, user, org):
+    def __init__(self, client, user, org, api_key=None):
         self._client = client
         self._user = user
         self._org = org
+        self._api_key = api_key
 
     async def _call(self, method: str, *args, **kwargs):
         from sutr.dependencies import AgentAuth, get_agent_auth
@@ -353,7 +354,7 @@ class _OrgClient:
 
         previous = app.dependency_overrides.get(get_agent_auth)
         app.dependency_overrides[get_agent_auth] = lambda: AgentAuth(
-            user=self._user, org=self._org, api_key=None
+            user=self._user, org=self._org, api_key=self._api_key
         )
         try:
             return await getattr(self._client, method)(*args, **kwargs)
@@ -461,6 +462,31 @@ async def test_an_organization_visible_tool_is_hidden_from_other_tenants(
     # Nobody else does.
     other = await _as_other_org(client, session, test_user)
     assert (await other.get("/v1/marketplace/listings")).json()["data"]["listings"] == []
+    # S12: knowing the id is not enough to subscribe, and the refusal is a 404
+    # that says nothing about the tool's lifecycle state.
+    response = await other.post("/v1/marketplace/subscriptions", json={"tool_id": data["id"]})
+    assert response.status_code == 404
+    assert "PUBLISHED" not in response.text and "organization" not in response.text
+    assert (await other.get("/v1/marketplace/subscriptions")).json()["data"]["subscriptions"] == []
+
+
+async def test_an_api_key_cannot_decide_a_change_request(client, session, test_org, api_key_record):
+    """L5: an API key has no identity to separate duties against, so it is
+    ineligible to decide — not exempt from the check."""
+    from sutr.models.registry_change_request import RegistryChangeRequest
+
+    data = await _register(client)
+    request = await client.post(
+        f"/v1/registry/tools/{data['id']}/visibility", json={"visibility": "public"}
+    )
+    request_id = request.json()["data"]["id"]
+    key_holder = _OrgClient(client, None, test_org, api_key=api_key_record[0])
+    response = await key_holder.post(
+        f"/v1/registry/change-requests/{request_id}/decide", json={"approve": True}
+    )
+    assert response.status_code == 403
+    session.expire_all()
+    assert session.get(RegistryChangeRequest, uuid.UUID(request_id)).status == "pending"
 
 
 async def test_a_missing_tool_is_404(client):

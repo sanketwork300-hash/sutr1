@@ -274,3 +274,22 @@ def test_plans_are_scoped_to_their_tenant(session, test_org, provider_org, plan)
     assert (
         session.exec(select(PricingPlan).where(PricingPlan.org_id == provider_org.id)).all() == []
     )
+
+
+def test_a_negative_tier_rate_is_refused_at_publish_time(session, test_org):
+    """L15: a negative tier reached the ledger as a negative amount, which it
+    refuses — at invoice time, far from the plan that caused it."""
+    with pytest.raises(InvalidRequestError, match="negative"):
+        _plan(
+            session,
+            test_org.id,
+            model="tiered",
+            tiers=[{"up_to": 100, "amount_micros": -1}, {"up_to": None, "amount_micros": 5}],
+        )
+    with pytest.raises(InvalidRequestError, match="integer"):
+        _plan(
+            session,
+            test_org.id,
+            model="tiered",
+            tiers=[{"up_to": None, "amount_micros": "lots"}],
+        )

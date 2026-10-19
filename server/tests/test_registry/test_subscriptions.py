@@ -67,7 +67,7 @@ def test_resubscribing_after_cancelling_writes_a_new_row(session, published_tool
 
 
 def test_an_unpublished_tool_takes_no_subscribers(session, registered_tool, other_org):
-    allowed, reason = subscriptions.subscribable(registered_tool)
+    allowed, reason = subscriptions.subscribable(registered_tool, other_org.id)
     assert allowed is False
     with pytest.raises(ConflictError):
         subscriptions.subscribe(session, org_id=other_org.id, tool=registered_tool)
@@ -77,7 +77,7 @@ def test_an_archived_tool_takes_no_subscribers(session, published_tool, other_or
     service.deprecate(session, published_tool, note="gone")
     service.archive(session, published_tool)
     session.commit()
-    allowed, reason = subscriptions.subscribable(published_tool)
+    allowed, reason = subscriptions.subscribable(published_tool, other_org.id)
     assert allowed is False
     assert "archived" in reason
 
@@ -91,9 +91,30 @@ def test_a_deprecated_tool_keeps_its_subscribers_but_takes_no_new_ones(
     session.commit()
 
     assert subscriptions.entitled(session, org_id=other_org.id, tool_id=published_tool.id) is True
-    allowed, reason = subscriptions.subscribable(published_tool)
+    allowed, reason = subscriptions.subscribable(published_tool, other_org.id)
     assert allowed is False
     assert "not published" in reason
+
+
+def test_an_organization_visible_tool_takes_no_subscribers_from_outside(
+    session, published_tool, other_org, test_org
+):
+    """S12/L8: listings hide an `organization` tool from other tenants, and the
+    subscribe path must agree with them rather than fall through to allowed."""
+    published_tool.visibility = "organization"
+    session.add(published_tool)
+    session.commit()
+
+    allowed, reason = subscriptions.subscribable(published_tool, other_org.id)
+    assert allowed is False
+    assert "organization" in reason
+    with pytest.raises(ConflictError, match="organization"):
+        subscriptions.subscribe(session, org_id=other_org.id, tool=published_tool)
+    assert session.exec(select(ToolSubscription)).all() == []
+
+    # Inside the owning organization, visibility is not the obstacle.
+    allowed, _ = subscriptions.subscribable(published_tool, test_org.id)
+    assert allowed is True
 
 
 def test_a_provider_cannot_subscribe_to_their_own_tool(session, published_tool, test_org):

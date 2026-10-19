@@ -108,7 +108,9 @@ export function ConnectDialog({ integration, open, reauth = false, onClose }: Pr
       if (authMethod === 'oauth') {
         try {
           const { authorization_url } = await api.oauth.start(integration.id)
-          window.open(authorization_url, '_blank')
+          // No opener: a custom MCP server's authorization URL is whatever the
+          // operator typed, and must not get a handle on this window.
+          window.open(authorization_url, '_blank', 'noopener,noreferrer')
         } catch (oauthErr) {
           if (!reauth) {
             await useConnectionsStore.getState().remove(integration.id)

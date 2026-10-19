@@ -17,7 +17,6 @@ org. It is not a way to serve several tenants.
 """
 
 import asyncio
-import hashlib
 import logging
 import os
 import sys
@@ -28,7 +27,7 @@ from sqlmodel import Session, select
 from sutr.db import engine
 from sutr.dependencies import AgentAuth
 from sutr.mcp.server import RequestMeta, _current_auth, _current_request_meta, mcp_server
-from sutr.models.api_key import ApiKey
+from sutr.models.api_key import ApiKey, hash_api_key
 from sutr.models.org import Org
 
 logger = logging.getLogger(__name__)
@@ -41,7 +40,7 @@ def authenticate_from_env() -> AgentAuth | None:
     raw_key = os.environ.get(ENV_VAR, "").strip()
     if not raw_key:
         return None
-    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    key_hash = hash_api_key(raw_key)
     with Session(engine) as session:
         api_key = session.exec(
             select(ApiKey).where(ApiKey.key_hash == key_hash).where(ApiKey.is_active == True)  # noqa: E712

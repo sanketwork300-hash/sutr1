@@ -447,3 +447,69 @@ async def test_setting_a_credential_is_audited(client, integration, session, tes
     assert "sk_live_x" not in json.dumps(
         {"summary": events[0].summary, "metadata": events[0].metadata_json}
     )
+
+
+# ── Secret references are org-scoped ─────────────────────────────────────────
+
+
+def test_credential_refs_carry_the_org_id_and_encode_the_scheme_name(session, test_org, auth):
+    """Two orgs that each add "Stripe" both get `customapi_stripe`; with a Vault
+    backend the ref is the path, so a ref without the org would make them share
+    one secret. The scheme name is an uploaded OpenAPI key, so it is encoded."""
+    from sutr.credentials.read import secret_ref
+    from sutr.models.secret import Secret
+
+    credential = upsert_credential(
+        session,
+        org_id=test_org.id,
+        integration_id=INTEGRATION_ID,
+        placement=_placement(auth, "hdr"),
+        value="sk_live_secret",
+    )
+    session.commit()
+    ref = session.get(Secret, credential.secret_id).ref
+    assert ref == f"credentials/{test_org.id}/{INTEGRATION_ID}/hdr"
+
+    assert (
+        secret_ref(test_org.id, "customapi_x", "api/key..?", "client_secret")
+        == f"credentials/{test_org.id}/customapi_x/api%2Fkey..%3F/client_secret"
+    )
+
+
+def test_client_secret_and_access_token_refs_are_org_scoped(session, test_org, auth):
+    from sutr.models.secret import Secret
+
+    credential = upsert_credential(
+        session,
+        org_id=test_org.id,
+        integration_id=INTEGRATION_ID,
+        placement=_placement(auth, "oauth"),
+        client_id="cid",
+        client_secret="csecret",
+    )
+    session.commit()
+    ref = session.get(Secret, credential.client_secret_id).ref
+    assert ref == f"credentials/{test_org.id}/{INTEGRATION_ID}/oauth/client_secret"
+
+
+def test_two_orgs_with_the_same_integration_id_get_different_refs(session, test_org, auth):
+    import uuid
+
+    from sutr.models.org import Org
+    from sutr.models.secret import Secret
+
+    other = Org(id=uuid.uuid4(), name="Other Org")
+    session.add(other)
+    session.commit()
+    refs = set()
+    for org in (test_org, other):
+        credential = upsert_credential(
+            session,
+            org_id=org.id,
+            integration_id=INTEGRATION_ID,
+            placement=_placement(auth, "hdr"),
+            value=f"key-for-{org.name}",
+        )
+        session.commit()
+        refs.add(session.get(Secret, credential.secret_id).ref)
+    assert len(refs) == 2

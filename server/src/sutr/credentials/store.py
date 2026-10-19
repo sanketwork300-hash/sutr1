@@ -11,7 +11,7 @@ from datetime import datetime
 
 from sqlmodel import Session
 
-from sutr.credentials.read import get_credential, list_credentials
+from sutr.credentials.read import get_credential, list_credentials, secret_ref
 from sutr.models.integration_credential import (
     KIND_AUTHORIZATION_CODE,
     KIND_BASIC,
@@ -93,7 +93,7 @@ def upsert_credential(
                 session,
                 org_id=org_id,
                 kind=f"integration_credential:{integration_id}:{placement.scheme_name}",
-                ref=f"{integration_id}:{placement.scheme_name}",
+                ref=secret_ref(org_id, integration_id, placement.scheme_name),
                 value=value,
                 secret_id=credential.secret_id,
             )
@@ -109,7 +109,7 @@ def upsert_credential(
                 session,
                 org_id=org_id,
                 kind=f"integration_client_secret:{integration_id}:{placement.scheme_name}",
-                ref=f"{integration_id}:{placement.scheme_name}:client_secret",
+                ref=secret_ref(org_id, integration_id, placement.scheme_name, "client_secret"),
                 value=client_secret,
                 secret_id=credential.client_secret_id,
             )

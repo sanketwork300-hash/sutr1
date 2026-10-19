@@ -9,13 +9,12 @@ from alembic.config import Config as AlembicConfig
 from alembic.script import ScriptDirectory
 from httpx import ASGITransport, AsyncClient
 
-import sutr.main as main_module
 from sutr.config import settings
 from sutr.main import app, check_database_schema
 
 
 def _migration_head() -> str:
-    server_root = Path(main_module.__file__).resolve().parent.parent.parent
+    server_root = Path(__file__).resolve().parent.parent
     script = ScriptDirectory.from_config(AlembicConfig(str(server_root / "alembic.ini")))
     return script.get_current_head()
 

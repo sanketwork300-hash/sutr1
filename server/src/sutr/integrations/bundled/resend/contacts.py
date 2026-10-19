@@ -4,7 +4,7 @@ from typing import Union
 
 import httpx
 
-from sutr.integrations.bundled.resend._http import _BASE_URL, response_to_result
+from sutr.integrations.bundled.resend._http import BASE_URL, response_to_result
 from sutr.integrations.types import ApiTool, CustomTool, Param
 
 _PAGINATION_PARAMS = [
@@ -46,7 +46,7 @@ async def _run_get_contact(args: dict, auth_headers: dict) -> dict:
         return _missing_id_result()
     async with httpx.AsyncClient() as client:
         r = await client.get(
-            f"{_BASE_URL}/contacts/{contact_id}",
+            f"{BASE_URL}/contacts/{contact_id}",
             headers=auth_headers,
             timeout=30.0,
         )
@@ -60,7 +60,7 @@ async def _run_update_contact(args: dict, auth_headers: dict) -> dict:
     body = {k: v for k, v in args.items() if k not in ("id", "email") and v is not None}
     async with httpx.AsyncClient() as client:
         r = await client.patch(
-            f"{_BASE_URL}/contacts/{contact_id}",
+            f"{BASE_URL}/contacts/{contact_id}",
             json=body,
             headers=auth_headers,
             timeout=30.0,
@@ -74,7 +74,7 @@ async def _run_remove_contact(args: dict, auth_headers: dict) -> dict:
         return _missing_id_result()
     async with httpx.AsyncClient() as client:
         r = await client.delete(
-            f"{_BASE_URL}/contacts/{contact_id}",
+            f"{BASE_URL}/contacts/{contact_id}",
             headers=auth_headers,
             timeout=30.0,
         )
@@ -112,7 +112,7 @@ async def _run_add_contact_to_segment(args: dict, auth_headers: dict) -> dict:
         body["email"] = args["email"]
     async with httpx.AsyncClient() as client:
         r = await client.post(
-            f"{_BASE_URL}/segments/{segment_id}/contacts",
+            f"{BASE_URL}/segments/{segment_id}/contacts",
             json=body,
             headers=auth_headers,
             timeout=30.0,
@@ -132,7 +132,7 @@ async def _run_remove_contact_from_segment(args: dict, auth_headers: dict) -> di
         }
     async with httpx.AsyncClient() as client:
         r = await client.delete(
-            f"{_BASE_URL}/segments/{segment_id}/contacts/{contact}",
+            f"{BASE_URL}/segments/{segment_id}/contacts/{contact}",
             headers=auth_headers,
             timeout=30.0,
         )
@@ -146,7 +146,7 @@ async def _run_list_contact_segments(args: dict, auth_headers: dict) -> dict:
     params = {k: args[k] for k in ("limit", "after", "before") if args.get(k) is not None}
     async with httpx.AsyncClient() as client:
         r = await client.get(
-            f"{_BASE_URL}/contacts/{contact_id}/segments",
+            f"{BASE_URL}/contacts/{contact_id}/segments",
             params=params or None,
             headers=auth_headers,
             timeout=30.0,
@@ -166,7 +166,7 @@ async def _run_list_contact_topics(args: dict, auth_headers: dict) -> dict:
     params = {k: args[k] for k in ("limit", "after", "before") if args.get(k) is not None}
     async with httpx.AsyncClient() as client:
         r = await client.get(
-            f"{_BASE_URL}/contacts/{contact_id}/topics",
+            f"{BASE_URL}/contacts/{contact_id}/topics",
             params=params or None,
             headers=auth_headers,
             timeout=30.0,
@@ -186,7 +186,7 @@ async def _run_update_contact_topics(args: dict, auth_headers: dict) -> dict:
         }
     async with httpx.AsyncClient() as client:
         r = await client.patch(
-            f"{_BASE_URL}/contacts/{contact_id}/topics",
+            f"{BASE_URL}/contacts/{contact_id}/topics",
             json={"topics": topics},
             headers=auth_headers,
             timeout=30.0,

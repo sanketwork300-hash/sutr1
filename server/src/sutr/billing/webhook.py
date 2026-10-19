@@ -25,6 +25,7 @@ def _safe_get(obj, key, default=None):
         if key in obj:
             return obj[key]
     except TypeError:
+        # Not a container (e.g. SimpleNamespace): fall through to attribute access.
         pass
     return getattr(obj, key, default)
 

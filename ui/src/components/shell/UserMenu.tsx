@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePostHog } from '@posthog/react'
+import { isAnalyticsEnabled } from '@/analytics/posthog'
 import { LogOut, Moon, Settings, Shield, Sun } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
@@ -38,7 +39,7 @@ export function UserMenu() {
   }, [open])
 
   function handleLogout() {
-    posthog?.reset()
+    if (isAnalyticsEnabled()) posthog?.reset()
     logout()
     navigate('/login')
   }

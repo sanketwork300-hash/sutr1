@@ -138,20 +138,21 @@ def evaluate(
     org_id: uuid.UUID,
     subject: dict[str, Any],
     resource: dict[str, Any],
+    policy_rules: list[dict],
     action: str = "invoke",
 ) -> RuleOutcome:
     """Run this tenant's rules. Deny wins; no rules is no opinion.
 
-    Two sources, one evaluation: standalone access rules, and the rules
-    contributed by every **ACTIVE** governance policy version (LLD §5.2 —
-    policies are *"deployed independently"*, and this is what deployed means).
-    Deny wins across both, so a governance policy cannot be overruled by a
-    standalone allow, and vice versa.
-    """
-    # Imported by full path so the boundary analysis sees `governance.policies`
-    # — the shared half — rather than the control-plane `governance` package.
-    from sutr.governance.policies import active_rules as policy_rules_for
+    Two sources, one evaluation: standalone access rules, and *policy_rules* —
+    the rules contributed by every **ACTIVE** governance policy version (LLD
+    §5.2 — policies are *"deployed independently"*, and this is what deployed
+    means). Deny wins across both, so a governance policy cannot be overruled
+    by a standalone allow, and vice versa.
 
+    The caller reads *policy_rules* (`governance.policies.active_rules`) and
+    passes them in, because `governance.policies` validates its documents with
+    this module: reading them here as well would make the two import each other.
+    """
     rows = session.exec(
         select(AccessRule)
         .where(AccessRule.org_id == org_id)
@@ -159,7 +160,6 @@ def evaluate(
         .where(AccessRule.action == action)
         .order_by(col(AccessRule.priority), col(AccessRule.name))
     ).all()
-    policy_rules = policy_rules_for(session, org_id=org_id, action=action)
     if not rows and not policy_rules:
         return RuleOutcome(effect=None, evaluated=0)
 

@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
 import { AppShell } from '@/components/shell/AppShell'
 import { useConfigStore } from '@/stores/config'
+import { AnalyticsTracker } from '@/analytics/AnalyticsTracker'
 
 const LandingPage = lazy(() => import('@/landing/LandingPage'))
 
@@ -115,6 +116,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <AnalyticsTracker />
       <Suspense fallback={RouteFallback}>
         <Routes>
           {/* ── Public ── */}

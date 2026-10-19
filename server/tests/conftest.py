@@ -16,63 +16,13 @@ from sutr.dependencies import (
     get_impersonator,
 )
 from sutr.main import app
-from sutr.models.access_pass import AccessPass  # noqa: F401
-from sutr.models.access_rule import AccessRule  # noqa: F401
-from sutr.models.agent_identity import AgentIdentity  # noqa: F401
-from sutr.models.api_key import ApiKey  # noqa: F401
-from sutr.models.api_source import ApiSource  # noqa: F401
-from sutr.models.business_rule import BusinessRule  # noqa: F401
-from sutr.models.chunk_embedding import ChunkEmbedding  # noqa: F401
-from sutr.models.consumed_event import ConsumedEvent  # noqa: F401
-from sutr.models.custom_api_integration import CustomApiIntegration  # noqa: F401
-from sutr.models.deployment_revision import DeploymentRevision  # noqa: F401
-from sutr.models.doc_workflow import DocWorkflow, GlossaryTerm  # noqa: F401
-from sutr.models.document import Document  # noqa: F401
-from sutr.models.document_chunk import DocumentChunk  # noqa: F401
-from sutr.models.document_job import DocumentJob  # noqa: F401
-from sutr.models.drift_report import DriftReport  # noqa: F401
-from sutr.models.google_login_state import GoogleLoginState  # noqa: F401
-from sutr.models.governance_exception import GovernanceException  # noqa: F401
-from sutr.models.governance_policy import (  # noqa: F401
-    GovernancePolicy,
-    GovernancePolicyVersion,
-)
-from sutr.models.governance_review import GovernanceReview  # noqa: F401
-from sutr.models.governance_run import ComplianceRun, RiskAssessment  # noqa: F401
-from sutr.models.idempotency_key import IdempotencyKey  # noqa: F401
-from sutr.models.integration import InstalledIntegration  # noqa: F401
-from sutr.models.integration_credential import IntegrationCredential  # noqa: F401
-from sutr.models.invoice import Invoice, InvoiceLine  # noqa: F401
-from sutr.models.knowledge_graph import KnowledgeEdge, KnowledgeNode  # noqa: F401
-from sutr.models.leader_lease import LeaderLease  # noqa: F401
-from sutr.models.ledger_entry import LedgerEntry  # noqa: F401
-from sutr.models.log import LogEntry  # noqa: F401
-from sutr.models.marketplace_listing import MarketplaceListing  # noqa: F401
-from sutr.models.marketplace_review import MarketplaceReview  # noqa: F401
-from sutr.models.oauth import OAuthState  # noqa: F401
-from sutr.models.oauth_client import OAuthClient  # noqa: F401
-from sutr.models.oauth_connect_state import OAuthConnectState  # noqa: F401
-from sutr.models.oauth_revoked_token import OAuthRevokedToken  # noqa: F401
+from sutr.models.api_key import ApiKey
+from sutr.models.metadata import register_all_models
 from sutr.models.org import Org
 from sutr.models.org_membership import OrgMembership
-from sutr.models.outbox_event import OutboxEvent  # noqa: F401
-from sutr.models.pricing_plan import PricingPlan  # noqa: F401
-from sutr.models.provider_connection import ProviderConnection  # noqa: F401
-from sutr.models.provider_profile import ProviderProfile  # noqa: F401
-from sutr.models.quota import Quota  # noqa: F401
-from sutr.models.registry_change_request import RegistryChangeRequest  # noqa: F401
-from sutr.models.registry_pricing import RegistryPricing  # noqa: F401
-from sutr.models.registry_tool import RegistryTool  # noqa: F401
-from sutr.models.registry_version import RegistryVersion  # noqa: F401
-from sutr.models.runtime_artifact import RuntimeArtifact  # noqa: F401
-from sutr.models.secret import Secret  # noqa: F401
-from sutr.models.settlement import PaymentAttempt, Settlement  # noqa: F401
-from sutr.models.subscription import Subscription  # noqa: F401
-from sutr.models.tool_approval_request import ToolApprovalRequest  # noqa: F401
-from sutr.models.tool_cache import ToolCache  # noqa: F401
-from sutr.models.tool_execution import ToolExecutionSetting  # noqa: F401
-from sutr.models.tool_subscription import ToolSubscription  # noqa: F401
 from sutr.models.user import User
+
+register_all_models()
 
 
 @pytest.fixture(autouse=True)

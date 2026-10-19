@@ -4,6 +4,7 @@ import secrets
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.exception_handlers import http_exception_handler as _default_http_handler
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 from sqlmodel import Session  # noqa: E402
 
+from sutr import db as db_module  # noqa: E402
 from sutr.analytics import posthog_client  # noqa: E402
 from sutr.api import (  # noqa: E402
     admin,
@@ -101,6 +103,7 @@ from sutr.observability.metrics import render as render_metrics  # noqa: E402
 from sutr.observability.propagation import extract as extract_trace_context  # noqa: E402
 from sutr.observability.tracing import configure_tracing, span, tracing_enabled  # noqa: E402
 from sutr.platform import leadership, mode  # noqa: E402
+from sutr.rate_limit import oauth_register_ip_limiter  # noqa: E402
 from sutr.request_context import (  # noqa: E402
     get_correlation_id,
     get_request_id,
@@ -108,6 +111,7 @@ from sutr.request_context import (  # noqa: E402
     set_correlation_id,
     set_request_id,
 )
+from sutr.secrets.records import reencrypt_legacy_secrets  # noqa: E402
 from sutr.services.source_sync_loop import source_sync_loop  # noqa: E402
 
 ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
@@ -119,14 +123,39 @@ RETRY_AFTER_STANDBY_SECONDS = 60
 HTML_CACHE_CONTROL = "no-cache"
 
 
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _base_url_is_loopback() -> bool:
+    try:
+        host = urlsplit(settings.base_url).hostname
+    except ValueError:
+        return False
+    return host in LOOPBACK_HOSTS
+
+
 def validate_startup_settings() -> None:
-    if settings.dev:
+    """Refuse the public default JWT secret.
+
+    `DEV=true` alone is not an excuse: it is also set to soften the schema
+    check, and the key signs sessions, impersonation tokens, MCP OAuth tokens
+    and (via HKDF) access passes. The only tolerated case is a dev instance
+    that is genuinely bound to this machine — `BASE_URL` on a loopback host —
+    and even that is logged so nobody mistakes it for a configured deployment.
+    """
+    if settings.jwt_secret_key != "change-me-in-production":
         return
-    if settings.jwt_secret_key == "change-me-in-production":
-        raise RuntimeError(
-            "Refusing to start with the default JWT secret key. Set JWT_SECRET_KEY to a "
-            "secure value before starting Sutr."
+    if settings.dev and _base_url_is_loopback():
+        logger.warning(
+            "Running with the default JWT secret key because DEV=true and BASE_URL is "
+            "loopback (%s). Set JWT_SECRET_KEY before exposing this instance.",
+            settings.base_url,
         )
+        return
+    raise RuntimeError(
+        "Refusing to start with the default JWT secret key. Set JWT_SECRET_KEY to a "
+        "secure value before starting Sutr."
+    )
 
 
 def check_database_schema() -> None:
@@ -140,8 +169,6 @@ def check_database_schema() -> None:
     from alembic.config import Config as AlembicConfig
     from alembic.script import ScriptDirectory
     from sqlalchemy import inspect
-
-    from sutr import db as db_module
 
     server_root = Path(__file__).resolve().parent.parent.parent
     ini_path = server_root / "alembic.ini"
@@ -173,6 +200,20 @@ def check_database_schema() -> None:
 async def lifespan(app: FastAPI):
     validate_startup_settings()
     check_database_schema()
+    # The SDK logs every new StreamableHTTP session id at INFO. A session id is
+    # a bearer-adjacent secret (it is what the session binding in mcp/asgi.py
+    # protects), so it must not be written to logs that are shipped elsewhere.
+    logging.getLogger("mcp.server.streamable_http_manager").setLevel(logging.WARNING)
+    # Rows written by the plaintext "db" backend are re-stored through the
+    # active (encrypting) backend once, at boot. Idempotent and a no-op when
+    # the active backend is still "db".
+    try:
+        with Session(db_module.engine) as secrets_session:
+            migrated = reencrypt_legacy_secrets(secrets_session)
+        if migrated:
+            logger.info("re-encrypted %d legacy plaintext secret rows", migrated)
+    except Exception:  # noqa: BLE001 — boot must not fail on a best-effort sweep
+        logger.exception("legacy secret re-encryption sweep failed")
     configure_tracing()
     # The marketplace is a projection of registry events, so its handlers have
     # to be registered before the relay starts delivering any (LLD §3.7), and
@@ -217,6 +258,8 @@ async def lifespan(app: FastAPI):
             try:
                 await task
             except asyncio.CancelledError:
+                # Expected: we cancelled it one loop up. Awaiting is only so
+                # each task finishes unwinding before the process goes away.
                 pass
         posthog_client.flush()
 
@@ -429,6 +472,48 @@ app.add_middleware(_TracingMiddleware)
 
 
 app.add_middleware(_RequestContextMiddleware)
+
+
+class _RegisterRateLimitMiddleware:
+    """Per-IP brake on OAuth dynamic client registration.
+
+    `POST /register` is served by the MCP SDK's own Starlette route, which is
+    appended to the router rather than declared here, so a FastAPI dependency
+    cannot be attached to it. Pure ASGI, like the other middleware, so it adds
+    nothing to the /mcp streaming path (which it never matches).
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (
+            scope["type"] != "http"
+            or scope.get("method") != "POST"
+            or scope.get("path") not in ("/register", "/register/")
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        client = scope.get("client")
+        ip = client[0] if client and client[0] else "unknown"
+        retry_after = oauth_register_ip_limiter.check(ip)
+        if retry_after:
+            response = JSONResponse(
+                status_code=429,
+                content={
+                    "error": "too_many_requests",
+                    "error_description": "Too many client registrations. Try again shortly.",
+                },
+                headers={"Retry-After": str(retry_after)},
+            )
+            await response(scope, receive, send)
+            return
+        oauth_register_ip_limiter.record(ip)
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(_RegisterRateLimitMiddleware)
 
 
 class _MCPPathMiddleware:
@@ -670,12 +755,22 @@ if _ui_dist.exists():
         name="ui-assets",
     )
 
+    # The build output is fixed once the image is built, so the files that may
+    # be served are listed once, here. The request path is only ever a key into
+    # this map and never becomes part of a filesystem path, so no spelling of
+    # it (`..`, encoded separators, symlinks) can reach outside ui_dist/.
+    _ui_files = {
+        path.relative_to(_ui_dist).as_posix(): path
+        for path in _ui_dist.rglob("*")
+        if path.is_file()
+    }
+
     # Catch-all: serve any existing root-level static file (favicon, etc.),
     # otherwise hand off to the React app so client-side routing works.
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str) -> FileResponse:
-        candidate = (_ui_dist / full_path).resolve()
-        if candidate.is_relative_to(_ui_dist) and candidate.is_file():
+        candidate = _ui_files.get(full_path)
+        if candidate is not None:
             cache_control = HTML_CACHE_CONTROL if candidate == _ui_index else None
             return _ui_file_response(candidate, cache_control=cache_control)
         return _ui_file_response(_ui_index, cache_control=HTML_CACHE_CONTROL)

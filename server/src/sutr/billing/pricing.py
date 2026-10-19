@@ -157,7 +157,7 @@ EVALUATORS = {
     MODEL_FREE: lambda plan, quantity: (0, {"reason": "free plan"}),
     MODEL_PER_INVOCATION: _per_unit,
     MODEL_PER_API_CALL: _per_unit,
-    MODEL_PER_SECOND: lambda plan, quantity: _per_unit(plan, quantity),
+    MODEL_PER_SECOND: _per_unit,
     MODEL_SUBSCRIPTION: lambda plan, quantity: (
         plan.base_micros,
         {"reason": "recurring base charge", "base_micros": plan.base_micros},
@@ -220,6 +220,28 @@ def validate(plan: PricingPlan) -> None:
         if plan.model == MODEL_TIERED and not tiers:
             raise InvalidRequestError("A tiered plan needs tiers.")
         if tiers:
+            for index, tier in enumerate(tiers):
+                if not isinstance(tier, dict):
+                    raise InvalidRequestError(f"Tier {index + 1} is not an object.")
+                try:
+                    rate = int(tier.get("amount_micros", 0))
+                    bound = tier.get("up_to")
+                    if bound is not None:
+                        bound = int(bound)
+                except (TypeError, ValueError):
+                    raise InvalidRequestError(
+                        f"Tier {index + 1} needs integer `amount_micros` and `up_to` values."
+                    )
+                if rate < 0:
+                    # Caught here, where it is cheap. A negative rate otherwise
+                    # surfaces at invoice time as a ledger refusing a negative
+                    # amount, far from the plan that caused it.
+                    raise InvalidRequestError(
+                        f"Tier {index + 1} has a negative `amount_micros`. A price cannot be "
+                        "negative; a discount is expressed with `discount_bps`."
+                    )
+                if bound is not None and bound <= 0:
+                    raise InvalidRequestError(f"Tier {index + 1} needs `up_to` above zero.")
             bounds = [tier.get("up_to") for tier in tiers]
             if bounds and bounds[-1] is not None:
                 raise InvalidRequestError(

@@ -2,7 +2,7 @@
 
 import asyncio
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
@@ -22,10 +22,22 @@ from sutr.models.user import User  # noqa: F401
 
 
 @dataclass
+class _FakeKey:
+    """Stand-in for an ApiKey row. API keys carry the role of their creator and
+    are checked through the permission matrix; a developer key may execute
+    tools, which is what these pipeline tests exercise."""
+
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+    key_prefix: str = "ap_fake-key"
+    name: str = "fake"
+    role: str = "developer"
+
+
+@dataclass
 class _FakeAuth:
     org: Org
     user: User | None = None
-    api_key: object | None = None
+    api_key: object | None = field(default_factory=_FakeKey)
     impersonator: User | None = None
 
 
@@ -262,9 +274,7 @@ async def test_await_approval_wakes_on_approve_and_executes(approval_env):
         return {"content": [{"type": "text", "text": "executed-ok"}]}
 
     with patch("sutr.mcp.client.call_tool", side_effect=fake_upstream):
-        approver_task = asyncio.create_task(approver())
-        result = await await_approval(request_id)
-        await approver_task
+        result, _ = await asyncio.gather(await_approval(request_id), approver())
 
     assert result[0].text == "executed-ok"
 
@@ -295,9 +305,7 @@ async def test_await_approval_returns_denied_message(approval_env):
             session.commit()
         approval_events.notify_decision(request_id, "denied")
 
-    denier_task = asyncio.create_task(denier())
-    result = await await_approval(request_id)
-    await denier_task
+    result, _ = await asyncio.gather(await_approval(request_id), denier())
 
     assert "denied by the human" in result[0].text.lower()
 

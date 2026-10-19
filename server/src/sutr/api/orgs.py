@@ -79,9 +79,17 @@ class CreateInvitationRequest(BaseModel):
 
 
 class CreateInvitationResponse(InvitationResponse):
-    # The raw invite link is returned once so self-hosted installs without a
-    # configured email backend can hand it to the invitee out-of-band.
-    invite_url: str
+    # The raw invite link is returned once, and ONLY when this server cannot
+    # email it (self-hosted, no email backend), so the inviter can hand it to
+    # the invitee out-of-band. Whenever the link is emailed, the inviter must
+    # not see it: holding the token would let them accept the invite and
+    # pre-register an account for the invitee's email with a password they
+    # control.
+    invite_url: str | None = None
+
+
+def _invite_link_delivered_by_email() -> bool:
+    return bool(settings.resend_api_key) or settings.is_cloud
 
 
 class UpdateMemberRequest(BaseModel):
@@ -337,7 +345,7 @@ def create_invitation(
 
     return CreateInvitationResponse(
         **_serialize_invitation(inv).model_dump(),
-        invite_url=invite_url,
+        invite_url=None if _invite_link_delivered_by_email() else invite_url,
     )
 
 
@@ -445,13 +453,17 @@ def accept_invitation(
             )
         if len(body.password) < 6:
             raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
-        # Possession of the emailed invite token proves control of the mailbox,
-        # so the account starts verified. No org is created — the user joins
-        # the inviting org (this also works on single-org self-hosted installs).
+        # The token proves control of the mailbox only when it travelled
+        # through the mailbox: with an email backend the inviter never sees
+        # it (create_invitation withholds invite_url), so the account can
+        # start verified. Without one the link was handed over out-of-band and
+        # the invitee verifies their email like any other signup. No org is
+        # created — the user joins the inviting org (this also works on
+        # single-org self-hosted installs).
         user = User(
             email=inv.email,
             hashed_password=hash_password(body.password),
-            email_verified=True,
+            email_verified=bool(settings.resend_api_key),
         )
         session.add(user)
         session.flush()

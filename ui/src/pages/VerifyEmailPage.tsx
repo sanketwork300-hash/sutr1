@@ -4,6 +4,7 @@ import { ApiError, api, type VerificationEmailRateLimitedDetail } from '@/api/cl
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { safeInternalPath } from '@/lib/safeRedirect'
 import { useAuthStore } from '@/stores/auth'
 import { useEmailVerificationStore } from '@/stores/emailVerification'
 
@@ -81,7 +82,7 @@ export default function VerifyEmailPage() {
           if (auth.access_token) {
             clearPendingVerification()
             setAuth(auth.access_token)
-            navigate(pending.redirect || '/integrations', { replace: true })
+            navigate(safeInternalPath(pending.redirect, '/integrations'), { replace: true })
             return
           }
         }
@@ -119,7 +120,7 @@ export default function VerifyEmailPage() {
       clearPendingVerification()
       if (res.access_token) {
         setAuth(res.access_token)
-        navigate(pending.redirect || '/integrations', { replace: true })
+        navigate(safeInternalPath(pending.redirect, '/integrations'), { replace: true })
         return
       }
       setMessage(res.message)

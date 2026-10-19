@@ -15,7 +15,6 @@ from sutr.models.integration import InstalledIntegration
 from sutr.models.org import Org
 from sutr.models.tool_cache import ToolCache
 from sutr.models.tool_execution import ToolExecutionSetting
-from sutr.models.user import User  # noqa: F401
 
 
 @pytest.fixture(name="policy_env")

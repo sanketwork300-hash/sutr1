@@ -106,10 +106,15 @@ def generate(
         raise InvalidRequestError("A billing period ends after it starts.")
 
     existing = for_period(session, org_id=org_id, start=period_start, end=period_end)
-    if existing is not None and existing.state not in (STATE_FAILED, STATE_VOID):
+    # Overlap, not identity: the usage below is summed over a range, so an
+    # invoice for Jan 1–30 after one for Jan 1–31 would price the same calls
+    # twice. A failed or voided invoice does not count; its row is reused.
+    clash = overlapping(session, org_id=org_id, start=period_start, end=period_end)
+    if clash is not None:
         raise ConflictError(
-            f"Invoice {existing.number} already covers this period. A second invoice for the "
-            "same usage would double-bill it; void the first if it is wrong."
+            f"Invoice {clash.number} already covers {clash.period_start:%Y-%m-%d}–"
+            f"{clash.period_end:%Y-%m-%d}, which overlaps this period. A second invoice for "
+            "the same usage would double-bill it; void the first if it is wrong."
         )
 
     invoice = existing or Invoice(
@@ -256,6 +261,13 @@ def void(session: Session, invoice: Invoice, *, reason: str) -> Invoice:
         if entry.reverses_entry_id is not None:
             continue
         ledger.reverse(session, entry, reason=f"{invoice.number} voided: {reason}")
+    # If a settlement already credited a provider for this invoice, that credit
+    # is now for revenue that does not exist. Settlements only count paid
+    # invoices and a paid invoice refuses to be voided, so this is reached only
+    # if that guard is ever relaxed — and then the payable must still be right.
+    from sutr.billing import settlement
+
+    settlement.reverse_invoice_share(session, invoice, reason=reason)
     invoice.state = STATE_VOID
     invoice.voided_at = _utcnow()
     invoice.void_reason = reason
@@ -277,11 +289,30 @@ def mark_paid(session: Session, invoice: Invoice) -> Invoice:
 def for_period(
     session: Session, *, org_id: uuid.UUID, start: datetime, end: datetime
 ) -> Invoice | None:
+    """The invoice with exactly these bounds, for retrying a failed one."""
     return session.exec(
         select(Invoice)
         .where(Invoice.org_id == org_id)
         .where(Invoice.period_start == start)
         .where(Invoice.period_end == end)
+    ).first()
+
+
+def overlapping(
+    session: Session, *, org_id: uuid.UUID, start: datetime, end: datetime
+) -> Invoice | None:
+    """A live invoice whose period intersects [start, end).
+
+    Two half-open periods intersect when each starts before the other ends.
+    Failed and voided invoices are not live: their usage is unbilled.
+    """
+    return session.exec(
+        select(Invoice)
+        .where(Invoice.org_id == org_id)
+        .where(col(Invoice.state).not_in((STATE_FAILED, STATE_VOID)))
+        .where(col(Invoice.period_start) < end)
+        .where(col(Invoice.period_end) > start)
+        .order_by(col(Invoice.period_start))
     ).first()
 
 

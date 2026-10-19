@@ -148,6 +148,8 @@ def resend_verification_by_email(
         try:
             send_verification_email(user, session)
         except VerificationEmailRateLimitedError:
+            # Swallowed on purpose: surfacing the limit would reveal that the
+            # address belongs to an unverified account.
             pass
     # Always return the same message to prevent email enumeration.
     return MessageResponse(

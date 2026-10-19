@@ -11,6 +11,7 @@ import {
   authenticateSession,
   checkConfiguration,
   countIntegrations,
+  insecureTransportWarning,
   loadTools,
   summarizePolicies,
   verifyMcpEndpoint,
@@ -109,6 +110,9 @@ export async function runConnect(
     async () => checkConfiguration(config),
     (value) => value.url,
   );
+  if (configuration.insecureTransport) {
+    ui.warn(insecureTransportWarning(configuration.url));
+  }
 
   const session = await ui.step(
     STEP_LABELS.authentication,

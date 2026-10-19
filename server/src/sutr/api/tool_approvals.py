@@ -206,7 +206,7 @@ def _decide(
 ) -> ToolApprovalRequest:
     req = _load_pending_request(session, request_id, current_org.id)
 
-    require_second_factor(current_user, totp_code)
+    require_second_factor(session, current_user, totp_code)
     session.add(current_user)
 
     now = datetime.utcnow()
@@ -322,7 +322,7 @@ def allow_tool(
     """Approve all future calls to this tool regardless of parameters."""
     req = _load_pending_request(session, request_id, current_org.id)
 
-    require_second_factor(current_user, totp_code)
+    require_second_factor(session, current_user, totp_code)
     session.add(current_user)
 
     now = datetime.utcnow()

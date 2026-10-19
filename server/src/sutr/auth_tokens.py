@@ -7,6 +7,11 @@ from sutr.config import settings
 
 EMAIL_VERIFICATION_SESSION_TTL = timedelta(hours=1)
 
+# A TOTP challenge is the handle a half-finished login holds while the user
+# types their authenticator code. Short-lived on purpose: it proves the first
+# factor only, and `_decode_rest_bearer_token` refuses it as a bearer.
+TOTP_CHALLENGE_TTL = timedelta(minutes=5)
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -78,6 +83,39 @@ def create_email_verification_session_token(user_id: str) -> str:
         settings.jwt_secret_key,
         algorithm=settings.jwt_algorithm,
     )
+
+
+def create_totp_challenge_token(user_id: str, *, token_version: int = 0) -> str:
+    """Mint the handle a first-factor-complete login carries into the TOTP step."""
+    now = _utcnow()
+    return jwt.encode(
+        {
+            "sub": user_id,
+            "iat": now,
+            "exp": now + TOTP_CHALLENGE_TTL,
+            "token_use": "totp_challenge",
+            "tv": token_version,
+        },
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+
+
+def decode_totp_challenge_token(token: str) -> tuple[str, int]:
+    """Return (user_id, token_version) for a valid challenge; ValueError otherwise."""
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+    except jwt.InvalidTokenError as exc:
+        raise ValueError("Invalid or expired second-factor challenge") from exc
+
+    if payload.get("token_use") != "totp_challenge" or not payload.get("sub"):
+        raise ValueError("Invalid or expired second-factor challenge")
+
+    return str(payload["sub"]), int(payload.get("tv") or 0)
 
 
 def decode_email_verification_session_token(token: str) -> str:

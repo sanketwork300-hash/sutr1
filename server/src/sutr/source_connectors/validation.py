@@ -7,17 +7,16 @@ the translation service, and the connector interface should not.
 from sutr.openapi.errors import OpenAPIError
 from sutr.openapi.loader import parse_spec_text
 from sutr.openapi.normalizer import normalize
+from sutr.source_connectors.validation_result import ValidationResult
 
 
-def validate_document(content: str):
+def validate_document(content: str) -> ValidationResult:
     """Parse and normalize, reporting the outcome rather than raising.
 
     A connector's caller wants "is this usable, and if not why" as data — a
     failed validation of a *watched* source is a routine event, not an
     exception path.
     """
-    from sutr.source_connectors.base import ValidationResult
-
     try:
         document = parse_spec_text(content)
         definition = normalize(document)

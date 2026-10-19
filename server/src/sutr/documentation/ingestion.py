@@ -30,7 +30,7 @@ from sutr.documentation.parsing import detect_kind
 from sutr.documentation.storage import digest, get_storage
 from sutr.models.document import KIND_TEXT, KINDS, STATUS_UPLOADED, Document
 from sutr.models.document_job import STATUS_QUEUED, DocumentJob
-from sutr.upstream_safety import UnsafeUpstreamUrlError, validate_safe_url
+from sutr.upstream_safety import UnsafeUpstreamUrlError, pinned_request_target
 
 FETCH_TIMEOUT = 30.0
 
@@ -109,9 +109,10 @@ async def ingest_uri(
     """Fetch `uri` and ingest what comes back.
 
     This is the LLD's `document_uri` input. It is screened for SSRF before the
-    request is made, and the response is size-capped while streaming rather
-    than after: a server that answers with ten gigabytes should cost us the
-    first twenty-five megabytes, not all of it.
+    request is made and the connection is pinned to the address that passed
+    the screen, and the response is size-capped while streaming rather than
+    after: a server that answers with ten gigabytes should cost us the first
+    twenty-five megabytes, not all of it.
     """
     parsed = urlparse(uri)
     if parsed.scheme not in ("http", "https"):
@@ -119,7 +120,7 @@ async def ingest_uri(
             f"Only http and https documentation URIs are supported, not {parsed.scheme or 'none'}."
         )
     try:
-        validate_safe_url(uri)
+        target = pinned_request_target(uri)
     except UnsafeUpstreamUrlError as exc:
         raise InvalidRequestError(f"The documentation URI was refused: {exc}") from exc
 
@@ -128,7 +129,9 @@ async def ingest_uri(
     try:
         chunks: list[bytes] = []
         size = 0
-        async with client.stream("GET", uri) as response:
+        async with client.stream(
+            "GET", target.url, headers=target.headers, extensions=target.extensions
+        ) as response:
             if response.status_code >= 400:
                 raise InvalidRequestError(
                     f"Fetching the document returned HTTP {response.status_code}."

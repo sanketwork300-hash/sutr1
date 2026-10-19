@@ -25,6 +25,7 @@ against a real server, and the traceability matrix says so.
 
 import logging
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -42,7 +43,7 @@ FIELD = "value"
 
 NOT_CONFIGURED = (
     "NOT_CONFIGURED: the Vault backend needs VAULT_ADDR and VAULT_TOKEN. Set them, or use "
-    "SECRETS_BACKEND=db (the default) or db_kms."
+    "SECRETS_BACKEND=db_encrypted (the default) or db_kms."
 )
 
 
@@ -103,6 +104,20 @@ def request(method: str, path: str, *, body: Any = None, tolerate: tuple[int, ..
     return _json(response) if response.content else {}
 
 
+def _segment(part: str) -> str:
+    """One path segment of a ref, made safe to interpolate into the Vault URL.
+
+    Parts of a ref come from user input (an OpenAPI security scheme name, for
+    one). Percent-encoding everything but unreserved characters means a `/`
+    cannot add a segment and a `?` or `#` cannot end the path; `.` and `..`
+    are encoded too, since an HTTP client normalises dot segments before the
+    request leaves and `..` would otherwise walk up out of the prefix.
+    """
+    if part in (".", ".."):
+        return part.replace(".", "%2E")
+    return quote(part, safe="")
+
+
 class VaultSecretsBackend(SecretsBackend):
     """Store secret payloads in Vault's KV v2 engine.
 
@@ -118,7 +133,7 @@ class VaultSecretsBackend(SecretsBackend):
 
     def _path(self, ref: str) -> str:
         prefix = settings.vault_path_prefix.strip("/")
-        cleaned = ref.strip("/")
+        cleaned = "/".join(_segment(part) for part in ref.strip("/").split("/") if part)
         return f"{prefix}/{cleaned}" if prefix else cleaned
 
     def store(self, ref: str, value: str) -> StoredSecret:
@@ -160,6 +175,8 @@ def describe() -> dict[str, Any]:
             if backend == "vault"
             else "AES-256-GCM with a KMS-wrapped data key"
             if backend == "db_kms"
+            else "AES-256-GCM in the database with a key from the environment"
+            if backend == "db_encrypted"
             else "plaintext in the database"
         ),
         "dynamic_credentials": {

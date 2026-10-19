@@ -903,8 +903,16 @@ export const api = {
         impersonator_email: string | null
       }>('/users/me')
     },
-    googleLogin() {
-      return request<{ authorization_url: string }>('/auth/google/login')
+    googleLogin(nonce: string) {
+      return request<{ authorization_url: string }>(
+        `/auth/google/login?nonce=${encodeURIComponent(nonce)}`,
+      )
+    },
+    totpChallenge(challenge_token: string, code: string) {
+      return request<TokenResponse>('/auth/totp-challenge', {
+        method: 'POST',
+        body: JSON.stringify({ challenge_token, code }),
+      })
     },
   },
   totp: {

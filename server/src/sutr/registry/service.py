@@ -448,10 +448,13 @@ def decide(
     """Approve or reject a pending change, applying it if approved."""
     if request.status != STATUS_PENDING:
         raise ConflictError(f"This request was already {request.status}.")
-    if (
-        decided_by_user_id is not None
-        and request.requested_by_user_id == decided_by_user_id
-        and eligible_approvers(session, request.org_id, excluding=decided_by_user_id)
+    if decided_by_user_id is None:
+        # An unidentified decider is not exempt from the gate; it is
+        # ineligible. The only caller that produces `None` is an API key, and
+        # the requester may well hold it.
+        raise ForbiddenError("A decision needs an identified user; API keys cannot approve.")
+    if request.requested_by_user_id == decided_by_user_id and eligible_approvers(
+        session, request.org_id, excluding=decided_by_user_id
     ):
         raise ForbiddenError(
             "You asked for this change, so somebody else has to decide it. Another member of "

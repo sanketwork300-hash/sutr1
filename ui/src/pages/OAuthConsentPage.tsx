@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams, useNavigate, Navigate } from 'react-router-dom'
-import { Loader2, ShieldCheck, ShieldX } from 'lucide-react'
+import { useSearchParams, Navigate } from 'react-router-dom'
+import { AlertTriangle, Loader2, ShieldCheck, ShieldX } from 'lucide-react'
+import { StandaloneImpersonationBanner } from '@/components/layout/ImpersonationBanner'
 import { Button } from '@/components/ui/button'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
@@ -12,6 +13,25 @@ interface SessionInfo {
   scope: string | null
   resource: string | null
   expires_at: number
+  /** True when the client registered itself; absent on older servers. */
+  dynamically_registered?: boolean
+}
+
+/**
+ * Where the authorization code will be sent, in the form a person can judge.
+ * The host for a web callback; the scheme for an app link, since
+ * `cursor://` says all there is to say.
+ */
+function describeRedirect(uri: string): { label: string; custom: boolean } {
+  try {
+    const url = new URL(uri)
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      return { label: url.host, custom: false }
+    }
+    return { label: `${url.protocol}//… (opens an app)`, custom: true }
+  } catch {
+    return { label: uri, custom: true }
+  }
 }
 
 export default function OAuthConsentPage() {
@@ -21,9 +41,10 @@ export default function OAuthConsentPage() {
 
   const [session, setSession] = useState<SessionInfo | null>(null)
   const [loading, setLoading] = useState(true)
-  const navigate = useNavigate()
   const [acting, setActing] = useState(false)
   const [error, setError] = useState('')
+  // Read once: the request either was or was not live when the page opened.
+  const [loadedAt] = useState(() => Date.now())
 
   useEffect(() => {
     if (!sessionToken || !token) return
@@ -69,13 +90,10 @@ export default function OAuthConsentPage() {
         action === 'approve'
           ? await api.oauthConsent.approve(sessionToken)
           : await api.oauthConsent.deny(sessionToken)
-      if (action === 'approve') {
-        const params = new URLSearchParams({ redirect: redirect_url })
-        if (clientLabel && clientLabel !== '—') params.set('client', clientLabel)
-        navigate(`/oauth/success?${params.toString()}`)
-      } else {
-        window.location.href = redirect_url
-      }
+      // Top-level navigation either way. The code goes straight to the
+      // client's callback — app links included — and this page, with its
+      // session token in the URL, is replaced rather than kept in history.
+      window.location.replace(redirect_url)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Action failed')
       setActing(false)
@@ -84,10 +102,15 @@ export default function OAuthConsentPage() {
 
   const scopes = session?.scope ? session.scope.split(' ').filter(Boolean) : []
   const clientLabel = session?.client_name || session?.client_id || '—'
-  const isExpired = session && session.expires_at < Date.now() / 1000
+  const isExpired = session && session.expires_at < loadedAt / 1000
+  const destination = session ? describeRedirect(session.redirect_uri) : null
+  // A client that registered itself chose its own name; only the destination
+  // is a fact. Older servers do not report the flag, and are treated the same.
+  const unverified = session ? session.dynamically_registered !== false : false
 
   return (
     <div style={pageStyle}>
+      <StandaloneImpersonationBanner />
       <div style={cardStyle}>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <ShieldCheck
@@ -117,6 +140,32 @@ export default function OAuthConsentPage() {
             <div style={sectionStyle}>
               <Row label="Client" value={clientLabel} mono={!session.client_name} />
               {session.resource && <Row label="Resource" value={session.resource} mono />}
+            </div>
+
+            <div style={{ ...sectionStyle, ...(unverified ? warningSectionStyle : {}) }}>
+              <div style={sectionLabelStyle}>Code will be sent to</div>
+              <div
+                style={{
+                  fontFamily: 'var(--font-mono, monospace)',
+                  fontSize: 15,
+                  fontWeight: 600,
+                  color: 'var(--text)',
+                  wordBreak: 'break-all',
+                }}
+              >
+                {destination?.label}
+              </div>
+              {unverified && (
+                <div style={warningBadgeStyle}>
+                  <AlertTriangle size={12} style={{ marginRight: 5, flexShrink: 0 }} />
+                  Unverified client
+                </div>
+              )}
+              <p style={{ fontSize: 12, color: 'var(--text-dim)', margin: 0, lineHeight: 1.5 }}>
+                {unverified
+                  ? 'This client registered itself and picked its own name. Only allow access if you started this request yourself and recognise the address above.'
+                  : 'Only allow access if you started this request yourself and recognise the address above.'}
+              </p>
             </div>
 
             {scopes.length > 0 && (
@@ -257,6 +306,24 @@ const sectionLabelStyle: React.CSSProperties = {
   color: 'var(--text-faint)',
   textTransform: 'uppercase',
   letterSpacing: '0.03em',
+}
+
+const warningSectionStyle: React.CSSProperties = {
+  borderColor: 'color-mix(in srgb, var(--yellow, #b45309) 45%, transparent)',
+}
+
+const warningBadgeStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  alignSelf: 'flex-start',
+  fontSize: 11,
+  fontWeight: 600,
+  padding: '3px 8px',
+  borderRadius: 4,
+  background: 'color-mix(in srgb, var(--yellow, #b45309) 18%, transparent)',
+  color: 'var(--yellow, #b45309)',
+  textTransform: 'uppercase',
+  letterSpacing: '0.04em',
 }
 
 const scopeTagStyle: React.CSSProperties = {

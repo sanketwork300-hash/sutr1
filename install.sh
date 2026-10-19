@@ -180,6 +180,19 @@ if [ -z "$(get_env JWT_SECRET_KEY)" ]; then
 	echo "• generated JWT_SECRET_KEY"
 fi
 
+# ── generate the secrets-encryption key ──────────────────────────────────────
+# Stored credentials are encrypted under this key, not under the JWT secret, so
+# either can be rotated without the other. Lose it and every stored credential
+# is unreadable: back up .env with the data volume.
+if [ -z "$(get_env SECRETS_ENCRYPTION_KEY)" ]; then
+	if command -v openssl >/dev/null 2>&1; then
+		set_env SECRETS_ENCRYPTION_KEY "$(openssl rand -hex 32)"
+	else
+		set_env SECRETS_ENCRYPTION_KEY "$(head -c 32 /dev/urandom | od -A n -t x1 | tr -d ' \n')"
+	fi
+	echo "• generated SECRETS_ENCRYPTION_KEY"
+fi
+
 chmod 600 .env
 
 # ── bring up the stack ───────────────────────────────────────────────────────

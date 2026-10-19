@@ -85,6 +85,7 @@ def _response_to_result(response: httpx.Response) -> dict:
         try:
             error_text = json.dumps(response.json())
         except Exception:
+            # Not JSON: keep the raw response text as the error detail.
             pass
         return {
             "content": [

@@ -117,10 +117,15 @@ def require_permission(permission: str):
 def ensure_agent_can(session: Session, auth: AgentAuth, permission: str) -> None:
     """Permission check for agent-facing endpoints (get_agent_auth callers).
 
-    API keys keep their documented capabilities (install + call) unchanged —
-    they carry no role, so only human-user contexts are role-checked.
+    API keys act with the role captured at creation (`ApiKey.role`) and go
+    through the same matrix as a user session, so a key minted by a developer
+    cannot reach owner/admin-only actions such as billing or approval
+    decisions. The documented key capabilities (install + call) are covered by
+    the developer role.
     """
     if auth.user is None:
+        if auth.api_key is None or not role_can(auth.api_key.role, permission):
+            raise _forbidden(permission)
         return
     membership = session.exec(
         select(OrgMembership)

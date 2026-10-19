@@ -1,23 +1,15 @@
-import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
 import { CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
+/**
+ * A static landing for a finished authorization.
+ *
+ * The consent page sends the browser straight to the client's callback, so
+ * nothing arrives here with a code any more. This page takes no parameters:
+ * an earlier version accepted `?redirect=` and loaded it, which made it a
+ * place anyone could point a link at.
+ */
 export default function OAuthSuccessPage() {
-  const [searchParams] = useSearchParams()
-  const redirectUrl = searchParams.get('redirect') ?? ''
-  const clientName = searchParams.get('client') ?? ''
-  const [callbackFired, setCallbackFired] = useState(false)
-
-  // Fire the redirect in a hidden iframe to deliver the auth code
-  // to the MCP client without navigating away from this page
-  useEffect(() => {
-    if (!redirectUrl || callbackFired) return
-    setCallbackFired(true)
-  }, [redirectUrl, callbackFired])
-
-  const displayName = clientName || 'the app'
-
   return (
     <div style={pageStyle}>
       <div style={cardStyle}>
@@ -29,15 +21,7 @@ export default function OAuthSuccessPage() {
           <p style={subtitleStyle}>Sutr</p>
         </div>
 
-        {clientName && (
-          <div style={sectionStyle}>
-            <Row label="Client" value={clientName} />
-          </div>
-        )}
-
-        <p style={messageStyle}>
-          Authorization is complete. You can return to {displayName} or close this window.
-        </p>
+        <p style={messageStyle}>Authorization is complete. You can close this window.</p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
           <Button
@@ -48,22 +32,8 @@ export default function OAuthSuccessPage() {
             Close window
           </Button>
         </div>
-
-        {/* Hidden iframe to deliver the auth code to the MCP client */}
-        {redirectUrl && callbackFired && (
-          <iframe src={redirectUrl} style={{ display: 'none' }} title="OAuth callback" sandbox="" />
-        )}
       </div>
       <p style={footerStyle}>Sutr</p>
-    </div>
-  )
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ display: 'flex', gap: 16, alignItems: 'baseline', fontSize: 13 }}>
-      <span style={rowLabelStyle}>{label}</span>
-      <span style={{ color: 'var(--text)', fontSize: 13 }}>{value}</span>
     </div>
   )
 }
@@ -112,27 +82,6 @@ const subtitleStyle: React.CSSProperties = {
   fontSize: 12,
   color: 'var(--text-faint)',
   margin: 0,
-}
-
-const sectionStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 8,
-  padding: '14px 16px',
-  background: 'var(--surface)',
-  borderRadius: 8,
-  border: '1px solid var(--border)',
-  marginBottom: 16,
-}
-
-const rowLabelStyle: React.CSSProperties = {
-  width: 64,
-  flexShrink: 0,
-  fontSize: 11,
-  fontWeight: 500,
-  color: 'var(--text-faint)',
-  textTransform: 'uppercase',
-  letterSpacing: '0.03em',
 }
 
 const messageStyle: React.CSSProperties = {

@@ -1,6 +1,7 @@
 import logging
 
 from sutr.email.backend import EmailBackend
+from sutr.observability.log_safety import single_line
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +31,13 @@ def _get_backend() -> EmailBackend | None:
 def send_email(to: str, subject: str, html: str) -> None:
     backend = _get_backend()
     if backend is None:
-        logger.warning("No email backend configured — skipping email to %s: %s", to, subject)
+        logger.warning(
+            "No email backend configured — skipping email to %s: %s",
+            single_line(to),
+            single_line(subject),
+        )
         return
     try:
         backend.send(to, subject, html)
     except Exception:
-        logger.exception("Failed to send email to %s: %s", to, subject)
+        logger.exception("Failed to send email to %s: %s", single_line(to), single_line(subject))

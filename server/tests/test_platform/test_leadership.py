@@ -7,6 +7,7 @@ mostly about contention: two owners, one lease, and which one loses.
 """
 
 import asyncio
+import contextlib
 from datetime import datetime, timedelta
 
 import pytest
@@ -189,10 +190,8 @@ async def test_the_work_runs_only_while_the_lease_is_held(session, monkeypatch):
     await asyncio.wait_for(cancelled.wait(), timeout=2)
 
     supervisor.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await supervisor
-    except asyncio.CancelledError:
-        pass
 
 
 async def test_a_replica_that_never_wins_never_starts_the_work(session, monkeypatch):
@@ -209,10 +208,8 @@ async def test_a_replica_that_never_wins_never_starts_the_work(session, monkeypa
     supervisor = asyncio.create_task(leadership.run_as_singleton(JOB, work, renew_seconds=0.01))
     await asyncio.sleep(0.1)
     supervisor.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await supervisor
-    except asyncio.CancelledError:
-        pass
 
     assert started is False
 
@@ -244,10 +241,8 @@ async def test_a_database_that_cannot_be_reached_stops_the_work(session, monkeyp
     await asyncio.wait_for(cancelled.wait(), timeout=2)
 
     supervisor.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await supervisor
-    except asyncio.CancelledError:
-        pass
 
 
 async def test_shutting_down_hands_the_lease_back(session, monkeypatch):
@@ -266,10 +261,8 @@ async def test_shutting_down_hands_the_lease_back(session, monkeypatch):
     supervisor = asyncio.create_task(leadership.run_as_singleton(JOB, work, renew_seconds=0.01))
     await asyncio.sleep(0.05)
     supervisor.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await supervisor
-    except asyncio.CancelledError:
-        pass
 
     # Best effort, and the point of it: a peer takes over in seconds rather
     # than waiting out the lease.

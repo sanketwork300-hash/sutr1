@@ -7,19 +7,23 @@ connection needs `integrations:manage`, a deploy connection needs
 `deployments:manage`.
 
 The callback is the delicate part. It arrives as a bare browser redirect with
-no sutr session on it, so the `state` row is the only thing binding the code
-to a user. That row is single-use, TTL-bounded, and deleted before the code is
-exchanged, whatever the outcome.
+no sutr session on it, so the `state` row binds the code to a user, and a
+cookie set when the flow started binds the row to the browser that asked for
+it. Without the cookie, anyone holding the consent URL could complete the flow
+and have *their* tokens stored on the requester's connection. The row is
+single-use, TTL-bounded, and deleted before the code is exchanged, whatever
+the outcome.
 """
 
+import hashlib
+import hmac
 import json
 import logging
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
-from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
@@ -55,9 +59,11 @@ from sutr.connections.targets import aws_accounts, azure_subscriptions, gcp_proj
 from sutr.db import get_session
 from sutr.dependencies import AgentAuth, get_agent_auth
 from sutr.models.oauth_connect_state import OAuthConnectState
+from sutr.observability.log_safety import single_line
 from sutr.openapi.errors import OpenAPIError
 from sutr.openapi.sources import list_github_repositories
 from sutr.services.audit import actor_from_agent_auth, record_audit, request_meta
+from sutr.ui_redirect import is_safe_ui_path, safe_ui_path, ui_url
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +84,68 @@ _PERMISSION = {
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# ── browser binding ──────────────────────────────────────────────────────────
+#
+# `authorize` sets a cookie carrying an HMAC of the state, and `oauth_callback`
+# requires it. The provider's redirect is a top-level GET, which SameSite=Lax
+# still sends, while a consent URL pasted into someone else's browser carries
+# no cookie at all. The key is derived from the JWT secret with its own HKDF
+# info string so a cookie value can never double as anything else.
+
+CONNECT_COOKIE = "sutr_connect"
+_CONNECT_COOKIE_INFO = b"sutr-connect-cookie"
+_CONNECT_COOKIE_PATH = "/api/connections"
+
+
+def _hkdf_sha256(secret: bytes, info: bytes, length: int = 32) -> bytes:
+    """HKDF-SHA256 with an empty salt (RFC 5869)."""
+    prk = hmac.new(b"\x00" * 32, secret, hashlib.sha256).digest()
+    out, block, counter = b"", b"", 1
+    while len(out) < length:
+        block = hmac.new(prk, block + info + bytes([counter]), hashlib.sha256).digest()
+        out += block
+        counter += 1
+    return out[:length]
+
+
+def _connect_cookie_value(state: str) -> str:
+    key = _hkdf_sha256(settings.jwt_secret_key.encode("utf-8"), _CONNECT_COOKIE_INFO)
+    return hmac.new(key, state.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _cookie_is_secure() -> bool:
+    return settings.base_url.lower().startswith("https://")
+
+
+def _set_connect_cookie(response: Response, state: str) -> None:
+    response.set_cookie(
+        CONNECT_COOKIE,
+        _connect_cookie_value(state),
+        max_age=int(STATE_TTL.total_seconds()),
+        path=_CONNECT_COOKIE_PATH,
+        httponly=True,
+        samesite="lax",
+        secure=_cookie_is_secure(),
+    )
+
+
+def _clear_connect_cookie(response: Response) -> None:
+    response.delete_cookie(
+        CONNECT_COOKIE,
+        path=_CONNECT_COOKIE_PATH,
+        httponly=True,
+        samesite="lax",
+        secure=_cookie_is_secure(),
+    )
+
+
+def _browser_matches(request: Request, state: str) -> bool:
+    presented = request.cookies.get(CONNECT_COOKIE)
+    if not presented:
+        return False
+    return hmac.compare_digest(presented, _connect_cookie_value(state))
 
 
 def _connect_error(exc: ConnectError) -> HTTPException:
@@ -118,27 +186,30 @@ def _sweep_expired(session: Session) -> None:
         session.delete(row)
 
 
-def _safe_redirect(target: str | None) -> str:
+# Connected accounts live under Govern → Credentials in the console.
+_DEFAULT_RETURN_PATH = "/app/credentials"
+
+
+def _ui_redirect(target: str | None, *, provider: str, status: str, detail: str = "") -> str:
     """Only ever send the browser back inside our own UI.
 
     An open redirect on a callback is how an OAuth flow becomes a phishing
     hop, so anything that is not a plain relative path is discarded rather
-    than sanitized.
+    than sanitized (see `ui_redirect`).
     """
-    base = settings.ui_base_url.rstrip("/")
-    if not target or not target.startswith("/") or target.startswith("//"):
-        # Connected accounts live under Govern → Credentials in the console.
-        return f"{base}/app/credentials"
-    return f"{base}{target}"
-
-
-def _ui_redirect(target: str | None, *, provider: str, status: str, detail: str = "") -> str:
-    url = _safe_redirect(target)
-    separator = "&" if "?" in url else "?"
-    query = f"connection={quote(provider)}&connection_status={quote(status)}"
+    query = {"connection": provider, "connection_status": status}
     if detail:
-        query += f"&connection_error={quote(detail[:200])}"
-    return f"{url}{separator}{query}"
+        query["connection_error"] = detail[:200]
+    return ui_url(safe_ui_path(target, fallback=_DEFAULT_RETURN_PATH), query=query)
+
+
+def _return_path(target: str | None) -> str | None:
+    """The client's return path if it stays inside the UI; otherwise none.
+
+    Vetted when stored as well as when used, because the device flow hands the
+    stored value back to the client instead of redirecting to it.
+    """
+    return target if is_safe_ui_path(target) else None
 
 
 class AuthorizeRequest(BaseModel):
@@ -190,10 +261,15 @@ def list_provider_connections(
 async def authorize(
     provider_id: str,
     body: AuthorizeRequest,
+    response: Response,
     session: Session = Depends(get_session),
     agent_auth: AgentAuth = Depends(get_agent_auth),
 ) -> dict:
-    """Begin a connection. Returns a URL to visit, or a device code to show."""
+    """Begin a connection. Returns a URL to visit, or a device code to show.
+
+    For the redirect flow the response also sets the browser-binding cookie
+    the callback will demand. The device flow has no callback, so none.
+    """
     user = _require_user(agent_auth)
     provider = _require_provider(provider_id)
     ensure_agent_can(session, agent_auth, _PERMISSION[provider_id])
@@ -214,7 +290,7 @@ async def authorize(
                 provider=provider_id,
                 org_id=agent_auth.org.id,
                 user_id=user.id,
-                redirect_after=body.redirect_after,
+                redirect_after=_return_path(body.redirect_after),
                 device_payload_json=json.dumps(
                     {
                         "client_id": device.client_id,
@@ -244,10 +320,11 @@ async def authorize(
             org_id=agent_auth.org.id,
             user_id=user.id,
             code_verifier=verifier,
-            redirect_after=body.redirect_after,
+            redirect_after=_return_path(body.redirect_after),
         )
     )
     session.commit()
+    _set_connect_cookie(response, state)
     return {
         "flow": "authorization_code",
         "authorization_url": authorization_url(provider, state=state, code_challenge=challenge),
@@ -258,6 +335,7 @@ async def authorize(
 @router.get("/{provider_id}/callback")
 async def oauth_callback(
     provider_id: str,
+    request: Request,
     state: str = Query(...),
     code: str | None = Query(default=None),
     error: str | None = Query(default=None),
@@ -269,15 +347,21 @@ async def oauth_callback(
     if provider is None:
         raise HTTPException(status_code=404, detail=f"Unknown provider '{provider_id}'.")
 
+    def _back(target: str | None, *, status: str, detail: str = "") -> RedirectResponse:
+        response = RedirectResponse(
+            _ui_redirect(target, provider=provider.id, status=status, detail=detail),
+            status_code=302,
+        )
+        # The cookie is for one flow; whatever happened, it is spent.
+        _clear_connect_cookie(response)
+        return response
+
     pending = session.exec(
         select(OAuthConnectState).where(OAuthConnectState.state == state)
     ).first()
     if pending is None or pending.provider != provider_id:
         # Nothing to attribute this code to; do not guess.
-        return RedirectResponse(
-            _ui_redirect(None, provider=provider_id, status="error", detail="invalid_state"),
-            status_code=302,
-        )
+        return _back(None, status="error", detail="invalid_state")
 
     org_id, user_id = pending.org_id, pending.user_id
     verifier = pending.code_verifier
@@ -290,30 +374,26 @@ async def oauth_callback(
     session.delete(pending)
     session.commit()
 
+    if not _browser_matches(request, state):
+        # The consent URL was completed by a browser other than the one that
+        # asked for it. Storing these tokens would hand this user's account to
+        # whoever started the flow, so the whole attempt is discarded.
+        logger.warning("connection callback for %s not bound to the starting browser", provider.id)
+        return _back(redirect_after, status="error", detail="browser_mismatch")
+
     if started < _utcnow() - STATE_TTL:
-        return RedirectResponse(
-            _ui_redirect(
-                redirect_after, provider=provider_id, status="error", detail="authorization_expired"
-            ),
-            status_code=302,
-        )
+        return _back(redirect_after, status="error", detail="authorization_expired")
     if error or not code:
         detail = error_description or error or "missing_code"
-        logger.info("connection aborted for %s: %s", provider_id, detail)
-        return RedirectResponse(
-            _ui_redirect(redirect_after, provider=provider_id, status="denied", detail=detail),
-            status_code=302,
-        )
+        logger.info("connection aborted for %s: %s", provider.id, single_line(detail))
+        return _back(redirect_after, status="denied", detail=detail)
 
     try:
         payload = await exchange_code(provider, code=code, code_verifier=verifier)
         label = await fetch_account_label(provider, payload)
     except ConnectError as exc:
-        logger.warning("connection failed for %s: %s", provider_id, exc.message)
-        return RedirectResponse(
-            _ui_redirect(redirect_after, provider=provider_id, status="error", detail=exc.message),
-            status_code=302,
-        )
+        logger.warning("connection failed for %s: %s", provider.id, single_line(exc.message))
+        return _back(redirect_after, status="error", detail=exc.message)
 
     connection = save_connection(
         session,
@@ -339,9 +419,7 @@ async def oauth_callback(
         metadata={"provider": provider_id, "scopes": connection.scopes},
     )
     session.commit()
-    return RedirectResponse(
-        _ui_redirect(redirect_after, provider=provider_id, status="connected"), status_code=302
-    )
+    return _back(redirect_after, status="connected")
 
 
 @router.post("/aws/poll")

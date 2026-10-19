@@ -283,7 +283,7 @@ async def test_google_callback_links_existing_user_via_case_variant(unauth_clien
     session.add(existing)
     session.commit()
 
-    start = await client.get("/api/auth/google/login")
+    start = await client.get("/api/auth/google/login?nonce=browser-nonce-0123456789")
     state = parse_qs(urlparse(start.json()["authorization_url"]).query)["state"][0]
 
     resp = await client.get(

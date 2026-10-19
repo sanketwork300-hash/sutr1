@@ -122,3 +122,38 @@ def _minimal_docx(paragraphs: list[str]) -> bytes:
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr("word/document.xml", document)
     return buffer.getvalue()
+
+
+def test_a_docx_part_that_would_inflate_past_the_cap_is_refused(monkeypatch):
+    """S18: the upload limit measures compressed bytes; the part's declared
+    size is checked before a byte of it is inflated."""
+    from sutr.documentation.parsing import ParseError, docx_parser
+
+    monkeypatch.setattr(docx_parser, "MAX_PART_BYTES", 64)
+    with pytest.raises(ParseError) as excinfo:
+        parse_document(KIND_DOCX, _minimal_docx(["A paragraph well past sixty-four bytes of XML."]))
+    assert excinfo.value.code == "docx_too_large"
+
+
+def test_a_docx_zip_bomb_is_refused_before_it_is_inflated():
+    """A few KiB of deflate that declares megabytes is nobody's document."""
+    import io
+    import zipfile
+
+    from sutr.documentation.parsing import ParseError
+
+    filler = " " * (4 * 1024 * 1024)
+    document = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body><w:p><w:r><w:t>{filler}</w:t></w:r></w:p></w:body></w:document>"
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", document)
+    bomb = buffer.getvalue()
+    assert len(bomb) < 64 * 1024, "the test needs a genuinely small upload"
+
+    with pytest.raises(ParseError) as excinfo:
+        parse_document(KIND_DOCX, bomb)
+    assert excinfo.value.code == "docx_suspicious_compression"

@@ -53,6 +53,7 @@ from sutr.models.log import LogEntry
 from sutr.models.oauth import OAuthState
 from sutr.models.usage_event import KIND_TOOL_CALL
 from sutr.observability import log_context
+from sutr.observability.log_safety import single_line
 from sutr.observability.metrics import observe_tool_call, observe_tool_gated
 from sutr.observability.tracing import span
 from sutr.provisioning import pdp
@@ -286,8 +287,8 @@ def evaluate_gate(
                 "tool call refused by %s: org=%s tool=%s/%s",
                 authorization.denied_by,
                 ctx.org_id,
-                integration_id,
-                tool_name,
+                single_line(integration_id),
+                single_line(tool_name),
             )
             return GateResult(
                 status="denied", args_hash=None, authorization=authorization.as_dict()
@@ -532,6 +533,10 @@ async def execute_tool(
                 state,
                 integration=bundled,
                 credentials=credentials,
+                # Passed explicitly rather than left to the default: this is
+                # the hot path, and the cap is the pipeline's promise to the
+                # replica's other tenants, not a detail of the client.
+                max_response_bytes=settings.tool_response_max_bytes,
             )
     else:
 
@@ -618,7 +623,12 @@ async def execute_tool(
     log_context.bind(status=outcome, duration_ms=duration_ms)
 
     if last_error is not None:
-        logger.warning("Tool call failed for %s/%s: %s", integration_id, tool_name, last_error)
+        logger.warning(
+            "Tool call failed for %s/%s: %s",
+            single_line(integration_id),
+            single_line(tool_name),
+            single_line(last_error),
+        )
     else:
         event_name = "tool_called_impersonated" if ctx.impersonator_user_id else "tool_called"
         posthog_client.capture(

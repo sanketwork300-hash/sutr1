@@ -13,7 +13,7 @@ from sqlmodel import Session
 
 from sutr.authz import ensure_agent_can
 from sutr.common import envelope
-from sutr.common.errors import NotFoundError
+from sutr.common.errors import ForbiddenError, NotFoundError
 from sutr.db import get_session
 from sutr.dependencies import AgentAuth, get_agent_auth
 from sutr.resilience import breaker, domains, retry, timeouts
@@ -22,9 +22,11 @@ from sutr.services.audit import actor_from_agent_auth, record_audit
 router = APIRouter(prefix="/v1/resilience", tags=["resilience"])
 
 READ = "logs:read"
-# Closing a circuit by hand is an operational act on shared state: every tenant
-# on this replica is affected by it.
-MANAGE = "org:manage"
+# Closing a circuit by hand is an operational act on shared state: the breaker
+# is keyed by provider, not by tenant, so every organization on this replica is
+# affected by it. That makes it a platform administrator's act, not a tenant
+# role's — no organization permission can authorize changing what other
+# organizations experience.
 
 
 @router.get("/policy")
@@ -84,12 +86,22 @@ def close_circuit(
     auth: AgentAuth = Depends(get_agent_auth),
     session: Session = Depends(get_session),
 ) -> dict:
-    """Close a circuit now, for an operator who has fixed the upstream.
+    """Close a circuit now, for a platform administrator who has fixed the upstream.
 
-    Audited, because it is a deliberate act on shared state that changes what
-    every caller on this replica experiences.
+    **Instance-wide.** The circuit breaker is one table per process keyed by
+    provider host; it is not scoped to the calling organization. Closing a
+    circuit here re-opens that upstream for every tenant served by this
+    replica, which is why only a platform administrator may do it — an
+    organization's own `org:manage` says nothing about other organizations.
+    Audited, because it is a deliberate act on shared state.
     """
-    ensure_agent_can(session, auth, MANAGE)
+    if auth.user is None or not auth.user.is_admin:
+        # Refused before the lookup: a tenant must not learn from a 404-vs-403
+        # difference whether some other tenant's provider is quarantined.
+        raise ForbiddenError(
+            "Closing a circuit changes shared state for every organization on this replica; "
+            "only a platform administrator can do it."
+        )
     if breaker.health(provider)["state"] == breaker.CLOSED:
         raise NotFoundError(f"No open circuit for {provider} on this replica.")
 

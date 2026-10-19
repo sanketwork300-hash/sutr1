@@ -67,7 +67,7 @@ def update_setting(
     # "require_approval" mode used by evaluate_policy.
     current_mode = setting.mode if setting else "require_approval"
     if current_mode != "allow" and body.mode == "allow":
-        require_second_factor(current_user, body.totp_code)
+        require_second_factor(session, current_user, body.totp_code)
         session.add(current_user)
 
     if setting:

@@ -125,6 +125,26 @@ def parse_github_url(url: str) -> GitHubTarget:
     return GitHubTarget(owner, repo)
 
 
+def _api_segment(value: str) -> str:
+    """One path segment of a registry API URL, built from user input.
+
+    The host of every GitHub or SwaggerHub API call is fixed, but the path is
+    assembled from an owner, a repository, a branch and a file path the user
+    pasted. Each piece is encoded whole, so a `/`, `?` or `#` cannot add a
+    segment or end the path, and `.`/`..` are refused outright: an HTTP client
+    resolves dot segments before sending, so `..` would walk the request to a
+    different endpoint of the same API, with the user's token attached.
+    """
+    if value in ("", ".", ".."):
+        raise OpenAPIError("bad_source_url", f"'{value}' is not a valid name in this URL.")
+    return quote(value, safe="")
+
+
+def _api_file_path(path: str) -> str:
+    """A repository file path, encoded segment by segment."""
+    return "/".join(_api_segment(part) for part in path.strip("/").split("/"))
+
+
 def _github_headers(token: str | None) -> dict[str, str]:
     headers = {
         "Accept": "application/vnd.github+json",
@@ -202,12 +222,14 @@ async def discover_github_specs(
     """List candidate spec files in a repository. Returns (candidates, branch)."""
     branch = target.branch
     if not branch:
-        repo_info = await _github_json(f"/repos/{quote(target.owner)}/{quote(target.repo)}", token)
+        repo_info = await _github_json(
+            f"/repos/{_api_segment(target.owner)}/{_api_segment(target.repo)}", token
+        )
         branch = repo_info.get("default_branch") or "main"
 
     tree = await _github_json(
-        f"/repos/{quote(target.owner)}/{quote(target.repo)}/git/trees/"
-        f"{quote(branch, safe='')}?recursive=1",
+        f"/repos/{_api_segment(target.owner)}/{_api_segment(target.repo)}/git/trees/"
+        f"{_api_segment(branch)}?recursive=1",
         token,
     )
     entries = tree.get("tree") or []
@@ -287,8 +309,8 @@ async def fetch_github_file(
 ) -> str:
     """Fetch one file's text through the contents API (works for private repos)."""
     data = await _github_json(
-        f"/repos/{quote(target.owner)}/{quote(target.repo)}/contents/"
-        f"{quote(path)}?ref={quote(branch, safe='')}",
+        f"/repos/{_api_segment(target.owner)}/{_api_segment(target.repo)}/contents/"
+        f"{_api_file_path(path)}?ref={quote(branch, safe='')}",
         token,
     )
     if isinstance(data, list):
@@ -318,6 +340,12 @@ async def fetch_github_file(
     download_url = data.get("download_url")
     if not download_url:
         raise OpenAPIError("fetch_failed", "GitHub did not return the file content.")
+    # The token goes with this request, so the URL must stay on GitHub even
+    # though GitHub is the one naming it.
+    if urlsplit(download_url).hostname not in GITHUB_HOSTS or not download_url.startswith(
+        "https://"
+    ):
+        raise OpenAPIError("fetch_failed", "GitHub returned a download URL off GitHub.")
     from sutr.openapi.loader import fetch_spec_from_url
 
     return await fetch_spec_from_url(download_url, headers=_github_headers(token))
@@ -341,7 +369,9 @@ async def fetch_from_github(
             )
         chosen = candidates[0].path
     elif not branch:
-        repo_info = await _github_json(f"/repos/{quote(target.owner)}/{quote(target.repo)}", token)
+        repo_info = await _github_json(
+            f"/repos/{_api_segment(target.owner)}/{_api_segment(target.repo)}", token
+        )
         branch = repo_info.get("default_branch") or "main"
 
     content = await fetch_github_file(target, chosen, branch, token)
@@ -410,9 +440,9 @@ async def fetch_from_swaggerhub(
     which is useful because our resolver refuses external references outright.
     """
     target = parse_swaggerhub_url(url)
-    path = f"/apis/{quote(target.owner)}/{quote(target.api)}"
+    path = f"/apis/{_api_segment(target.owner)}/{_api_segment(target.api)}"
     if target.version:
-        path += f"/{quote(target.version, safe='')}"
+        path += f"/{_api_segment(target.version)}"
     query = "?resolved=true" if resolved else ""
 
     headers = {"Accept": "application/json", "User-Agent": "sutr-openapi-import"}

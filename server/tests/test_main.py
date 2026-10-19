@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import pytest
@@ -62,3 +63,45 @@ def test_ui_file_response_can_disable_caching(tmp_path: Path):
     response = _ui_file_response(index_file, cache_control=HTML_CACHE_CONTROL)
 
     assert response.headers["cache-control"] == HTML_CACHE_CONTROL
+
+
+# ── S16: the default JWT secret is only tolerated on a loopback dev instance ─
+
+
+def test_dev_mode_alone_does_not_excuse_the_default_jwt_secret(monkeypatch):
+    monkeypatch.setattr(settings, "dev", True)
+    monkeypatch.setattr(settings, "base_url", "https://sutr.example.com")
+    monkeypatch.setattr(settings, "jwt_secret_key", "change-me-in-production")
+
+    with pytest.raises(RuntimeError, match="default JWT secret"):
+        validate_startup_settings()
+
+
+def test_dev_mode_on_loopback_accepts_the_default_secret_with_a_warning(monkeypatch, caplog):
+    monkeypatch.setattr(settings, "dev", True)
+    monkeypatch.setattr(settings, "base_url", "http://localhost:4747")
+    monkeypatch.setattr(settings, "jwt_secret_key", "change-me-in-production")
+
+    # Attach caplog's handler to the module logger directly: other test
+    # modules reconfigure the root logger, so relying on propagation makes
+    # this assertion order-dependent.
+    module_logger = logging.getLogger("sutr.main")
+    # The alembic migration tests run logging.config.fileConfig, which
+    # disables every logger that already existed; undo that here.
+    module_logger.disabled = False
+    module_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.WARNING, logger="sutr.main"):
+            validate_startup_settings()
+    finally:
+        module_logger.removeHandler(caplog.handler)
+    assert any("default JWT secret" in rec.getMessage() for rec in caplog.records)
+
+
+def test_loopback_without_dev_mode_still_refuses_the_default_secret(monkeypatch):
+    monkeypatch.setattr(settings, "dev", False)
+    monkeypatch.setattr(settings, "base_url", "http://127.0.0.1:4747")
+    monkeypatch.setattr(settings, "jwt_secret_key", "change-me-in-production")
+
+    with pytest.raises(RuntimeError, match="default JWT secret"):
+        validate_startup_settings()

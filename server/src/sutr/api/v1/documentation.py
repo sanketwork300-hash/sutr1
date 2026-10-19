@@ -524,14 +524,18 @@ def get_graph(
     """The knowledge graph, either whole (per document) or around one node."""
     ensure_agent_can(session, agent_auth, READ)
     if entity_type and entity_key:
-        result = neighbours(
-            session,
-            org_id=agent_auth.org.id,
-            entity_type=entity_type,
-            entity_key=entity_key,
-            depth=depth,
-        )
-        return envelope(result)
+        # `neighbours` walks from a node id; the caller names the node by its
+        # identity, which is unique per tenant.
+        start = session.exec(
+            select(KnowledgeNode)
+            .where(KnowledgeNode.org_id == agent_auth.org.id)
+            .where(KnowledgeNode.entity_type == entity_type)
+            .where(KnowledgeNode.entity_key == entity_key)
+        ).first()
+        if start is None:
+            raise NotFoundError(f"No {entity_type} node '{entity_key}' was found.")
+        result = neighbours(session, agent_auth.org.id, start.id, depth=depth)
+        return envelope(_graph_payload(result["nodes"], result["edges"]))
 
     statement = select(KnowledgeNode).where(KnowledgeNode.org_id == agent_auth.org.id)
     if document_id:
@@ -545,31 +549,33 @@ def get_graph(
         ).all()
         if edge.source_node_id in node_ids and edge.target_node_id in node_ids
     ]
-    return envelope(
-        {
-            "nodes": [
-                {
-                    "id": str(node.id),
-                    "entity_type": node.entity_type,
-                    "entity_key": node.entity_key,
-                    "label": node.label,
-                    "properties": json.loads(node.properties_json or "{}"),
-                    "document_id": str(node.document_id) if node.document_id else None,
-                }
-                for node in nodes
-            ],
-            "edges": [
-                {
-                    "id": str(edge.id),
-                    "source": str(edge.source_node_id),
-                    "target": str(edge.target_node_id),
-                    "relationship": edge.relationship,
-                    "properties": json.loads(edge.properties_json or "{}"),
-                }
-                for edge in edges
-            ],
-        }
-    )
+    return envelope(_graph_payload(nodes, edges))
+
+
+def _graph_payload(nodes, edges) -> dict:
+    return {
+        "nodes": [
+            {
+                "id": str(node.id),
+                "entity_type": node.entity_type,
+                "entity_key": node.entity_key,
+                "label": node.label,
+                "properties": json.loads(node.properties_json or "{}"),
+                "document_id": str(node.document_id) if node.document_id else None,
+            }
+            for node in nodes
+        ],
+        "edges": [
+            {
+                "id": str(edge.id),
+                "source": str(edge.source_node_id),
+                "target": str(edge.target_node_id),
+                "relationship": edge.relationship,
+                "properties": json.loads(edge.properties_json or "{}"),
+            }
+            for edge in edges
+        ],
+    }
 
 
 @router.get("/search")

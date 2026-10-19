@@ -21,7 +21,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session
 
 from sutr.authz import ensure_agent_can
@@ -109,12 +109,20 @@ class PaymentRequest(BaseModel):
 
 
 class SettlementRequest(BaseModel):
+    """A settlement run, for the caller's own organization.
+
+    There is deliberately **no share field**. The caller is the provider being
+    paid, and a payee who can name their own percentage can name 100%. The
+    split is platform configuration (`REVENUE_SHARE_PROVIDER_BPS`); extra
+    fields are refused rather than ignored so a client that still sends one
+    learns that it stopped meaning anything.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     provider_org_id: uuid.UUID | None = None
     period_start: datetime
     period_end: datetime
-    # Overrides the configured share for this run. The percentage is never
-    # hard-coded, and this is where a one-off arrangement is expressed.
-    provider_share_bps: int | None = Field(default=None, ge=0, le=10_000)
     simulate_failure: str = ""
 
 
@@ -463,12 +471,13 @@ def run_settlement(
             "A settlement is run for your own organization. Another tenant's earnings are not "
             "yours to compute."
         )
+    # The share is never taken from the request: `run` falls back to the
+    # configured split when none is given, and none is ever given here.
     record = settlement.run(
         session,
         provider_org_id=provider_org_id,
         period_start=body.period_start,
         period_end=body.period_end,
-        provider_share_bps=body.provider_share_bps,
         fail_with=body.simulate_failure,
     )
     record_audit(

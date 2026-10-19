@@ -17,6 +17,7 @@ import { useAuthStore } from '@/stores/auth'
 import { LOGOS } from '@/components/connections/IntegrationCard'
 import { CodeInput } from '@/components/totp/CodeInput'
 import { isTotpChallengeError } from '@/lib/totpError'
+import { StandaloneImpersonationBanner } from '@/components/layout/ImpersonationBanner'
 
 interface ApprovePageProps {
   /** When rendered inline (e.g. playground drawer) override the URL param */
@@ -246,6 +247,7 @@ export default function ApprovePage({
           : pageStyle
       }
     >
+      {!embedded && <StandaloneImpersonationBanner />}
       <div
         style={
           embedded

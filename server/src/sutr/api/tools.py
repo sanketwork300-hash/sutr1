@@ -17,6 +17,7 @@ from sutr.db import get_session
 from sutr.dependencies import AgentAuth, get_agent_auth
 from sutr.models.integration import InstalledIntegration
 from sutr.models.oauth import OAuthState
+from sutr.observability.log_safety import single_line
 from sutr.services import tool_catalog
 from sutr.services.tool_pipeline import CallContext, evaluate_gate, execute_tool
 
@@ -101,7 +102,9 @@ async def list_tools(
         tools = await tool_catalog.get_tools_cached(installed, oauth_state, session)
         return tool_catalog.annotate_tools(tools, session, current_org.id, integration_id)
     except Exception as e:
-        logger.warning("Failed to list tools for %s: %s", integration_id, e)
+        logger.warning(
+            "Failed to list tools for %s: %s", single_line(integration_id), single_line(e)
+        )
         raise HTTPException(
             status_code=502, detail=f"Failed to list tools for integration '{integration_id}'"
         ) from e

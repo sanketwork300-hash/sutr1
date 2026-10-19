@@ -1,4 +1,4 @@
-import { readConfig, type Config } from "./config.js";
+import { credentialHeaderValue, instanceBaseUrl, readConfig, type Config } from "./config.js";
 
 export class ApprovalRequiredError extends Error {
   approvalUrl: string;
@@ -57,7 +57,7 @@ export function buildHeaders(config: Config, hasBody: boolean): Record<string, s
   };
 
   if (config.auth_mode === "api_key" && config.api_key) {
-    headers["X-API-Key"] = config.api_key;
+    headers["X-API-Key"] = credentialHeaderValue(config.api_key);
   }
 
   if (hasBody) {
@@ -65,6 +65,34 @@ export function buildHeaders(config: Config, hasBody: boolean): Record<string, s
   }
 
   return headers;
+}
+
+/**
+ * Redirects are never followed. `fetch` would re-send `X-API-Key` to wherever a
+ * 3xx points, so an instance URL that answers with a redirect would hand the
+ * key to another host; the CLI reports the redirect and lets the user fix the
+ * URL instead.
+ */
+export const FETCH_REDIRECT: RequestRedirect = "manual";
+
+export class RedirectRefusedError extends Error {
+  status: number;
+  location: string | null;
+
+  constructor(status: number, from: string, location: string | null) {
+    super(
+      `${from} answered with a ${status} redirect${location ? ` to ${location}` : ""}. ` +
+        "The CLI does not follow redirects because that would forward your API key. " +
+        "Point the instance URL at the final address with `sutr auth set-instance-url <url>`.",
+    );
+    this.name = "RedirectRefusedError";
+    this.status = status;
+    this.location = location;
+  }
+}
+
+export function isRedirect(status: number): boolean {
+  return status >= 300 && status < 400;
 }
 
 async function performRequest(
@@ -79,6 +107,7 @@ async function performRequest(
     headers: buildHeaders(config, body !== undefined),
     body: body !== undefined ? JSON.stringify(body) : undefined,
     signal: timeoutMs !== undefined ? AbortSignal.timeout(timeoutMs) : undefined,
+    redirect: FETCH_REDIRECT,
   });
 }
 
@@ -89,7 +118,7 @@ export async function request<T = unknown>(
   const { method = "GET", body, params, timeoutMs } = opts;
   const config = opts.config ?? readConfig();
 
-  const baseUrl = config.url.replace(/\/+$/, "");
+  const baseUrl = instanceBaseUrl(config);
   let url = `${baseUrl}${path}`;
   if (params) {
     const qs = new URLSearchParams(params).toString();
@@ -112,6 +141,11 @@ export async function request<T = unknown>(
       );
     }
     throw new Error(`Request to ${baseUrl} failed: ${msg}`);
+  }
+
+  if (isRedirect(res.status)) {
+    await res.body?.cancel().catch(() => undefined);
+    throw new RedirectRefusedError(res.status, baseUrl, res.headers.get("location"));
   }
 
   if (res.status === 204) return undefined as T;

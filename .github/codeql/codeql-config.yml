@@ -1,0 +1,7 @@
+name: Sutr CodeQL config
+
+# Alembic reads `revision`, `down_revision`, `branch_labels` and `depends_on` from each
+# migration module by name, which CodeQL reports as unused globals. Migrations are
+# static schema changes with no request-handling code, so they are left out.
+paths-ignore:
+  - server/alembic/versions

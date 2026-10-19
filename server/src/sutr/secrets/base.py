@@ -17,14 +17,11 @@ class SecretsBackend(ABC):
     @abstractmethod
     def store(self, ref: str, value: str) -> StoredSecret:
         """Persist *value* and return backend-specific storage metadata."""
-        ...
 
     @abstractmethod
     def retrieve(self, secret: Secret) -> str | None:
         """Return the plaintext secret for the given record."""
-        ...
 
     @abstractmethod
     def delete(self, secret: Secret) -> None:
         """Remove the secret from the backend."""
-        ...

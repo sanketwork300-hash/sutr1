@@ -4,7 +4,7 @@ import json
 
 import httpx
 
-_BASE_URL = "https://api.resend.com"
+BASE_URL = "https://api.resend.com"
 
 
 def response_to_result(response: httpx.Response) -> dict:
@@ -14,6 +14,7 @@ def response_to_result(response: httpx.Response) -> dict:
         try:
             error_text = json.dumps(response.json())
         except Exception:
+            # Not JSON: keep the raw response text as the error detail.
             pass
         return {
             "content": [

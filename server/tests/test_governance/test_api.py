@@ -53,6 +53,26 @@ async def test_an_author_cannot_approve_their_own_version(client):
     assert "cannot approve it" in response.json()["error"]["message"]
 
 
+async def test_an_api_key_cannot_approve_a_policy_version(
+    client, session, test_org, api_key_record
+):
+    """L5: the author switching from a JWT to an API key must not become a
+    second pair of eyes."""
+    from sutr.models.governance_policy import GovernancePolicyVersion
+
+    data = await _create_policy(client)
+    await client.post(
+        f"/v1/governance/policies/{data['id']}/versions/1/transition", json={"to": "REVIEW"}
+    )
+    key_holder = _OrgClient(client, None, test_org, api_key=api_key_record[0])
+    response = await key_holder.post(
+        f"/v1/governance/policies/{data['id']}/versions/1/transition", json={"to": "APPROVED"}
+    )
+    assert response.status_code == 403
+    session.expire_all()
+    assert session.exec(select(GovernancePolicyVersion)).one().state == "REVIEW"
+
+
 async def test_an_impossible_transition_names_both_ends(client):
     data = await _create_policy(client)
     response = await client.post(
@@ -190,8 +210,9 @@ async def test_writing_policy_needs_more_than_read_access(client, session, test_
 
 
 class _OrgClient:
-    def __init__(self, client, user, org):
+    def __init__(self, client, user, org, api_key=None):
         self._client, self._user, self._org = client, user, org
+        self._api_key = api_key
 
     async def _call(self, method, *args, **kwargs):
         from sutr.dependencies import AgentAuth, get_agent_auth
@@ -199,7 +220,7 @@ class _OrgClient:
 
         previous = app.dependency_overrides.get(get_agent_auth)
         app.dependency_overrides[get_agent_auth] = lambda: AgentAuth(
-            user=self._user, org=self._org, api_key=None
+            user=self._user, org=self._org, api_key=self._api_key
         )
         try:
             return await getattr(self._client, method)(*args, **kwargs)

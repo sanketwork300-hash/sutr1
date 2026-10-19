@@ -16,6 +16,10 @@ from sutr.models.org import Org
 from sutr.models.org_membership import OrgMembership
 from sutr.models.user import User
 
+# Browser-side nonce every flow must start with (echoed back in the fragment).
+NONCE = "browser-nonce-0123456789abcdef"
+LOGIN_URL = f"/api/auth/google/login?nonce={NONCE}"
+
 
 class _FakeGoogleAsyncClient:
     """Stand-in for httpx.AsyncClient during Google login tests.
@@ -96,7 +100,7 @@ async def fresh_client_fixture(monkeypatch):
 async def test_start_returns_authorization_url(fresh_client):
     client, session = fresh_client
 
-    resp = await client.get("/api/auth/google/login")
+    resp = await client.get(LOGIN_URL)
     assert resp.status_code == 200
 
     url = resp.json()["authorization_url"]
@@ -119,7 +123,7 @@ async def test_start_returns_503_when_unconfigured(fresh_client, monkeypatch):
     client, _ = fresh_client
     monkeypatch.setattr(settings, "google_login_client_id", "")
 
-    resp = await client.get("/api/auth/google/login")
+    resp = await client.get(LOGIN_URL)
     assert resp.status_code == 503
 
 
@@ -127,7 +131,7 @@ async def test_start_returns_503_when_unconfigured(fresh_client, monkeypatch):
 async def test_callback_creates_new_user_and_redirects_with_token(fresh_client):
     client, session = fresh_client
 
-    start = await client.get("/api/auth/google/login")
+    start = await client.get(LOGIN_URL)
     state = parse_qs(urlparse(start.json()["authorization_url"]).query)["state"][0]
 
     resp = await client.get(
@@ -168,7 +172,7 @@ async def test_callback_links_existing_user_by_email(fresh_client):
     session.commit()
     session.refresh(existing)
 
-    start = await client.get("/api/auth/google/login")
+    start = await client.get(LOGIN_URL)
     state = parse_qs(urlparse(start.json()["authorization_url"]).query)["state"][0]
 
     resp = await client.get(
@@ -201,7 +205,7 @@ async def test_callback_reuses_existing_google_user(fresh_client):
     session.add(existing)
     session.commit()
 
-    start = await client.get("/api/auth/google/login")
+    start = await client.get(LOGIN_URL)
     state = parse_qs(urlparse(start.json()["authorization_url"]).query)["state"][0]
 
     resp = await client.get(
@@ -230,7 +234,7 @@ async def test_callback_rejects_unknown_state(fresh_client):
 async def test_callback_propagates_oauth_error(fresh_client):
     client, _ = fresh_client
 
-    start = await client.get("/api/auth/google/login")
+    start = await client.get(LOGIN_URL)
     state = parse_qs(urlparse(start.json()["authorization_url"]).query)["state"][0]
 
     resp = await client.get(
@@ -246,7 +250,7 @@ async def test_callback_blocked_when_signups_disabled(fresh_client, monkeypatch)
     client, session = fresh_client
     monkeypatch.setattr(settings, "block_signups", True)
 
-    start = await client.get("/api/auth/google/login")
+    start = await client.get(LOGIN_URL)
     state = parse_qs(urlparse(start.json()["authorization_url"]).query)["state"][0]
 
     resp = await client.get(
@@ -266,7 +270,7 @@ async def test_callback_blocked_when_self_hosted_org_exists(fresh_client, monkey
     session.add(Org(name="Existing"))
     session.commit()
 
-    start = await client.get("/api/auth/google/login")
+    start = await client.get(LOGIN_URL)
     state = parse_qs(urlparse(start.json()["authorization_url"]).query)["state"][0]
 
     resp = await client.get(
@@ -415,7 +419,7 @@ async def test_callback_rejects_unverified_email_for_existing_account(fresh_clie
         },
     )
 
-    start = await client.get("/api/auth/google/login")
+    start = await client.get(LOGIN_URL)
     state = parse_qs(urlparse(start.json()["authorization_url"]).query)["state"][0]
 
     resp = await client.get(

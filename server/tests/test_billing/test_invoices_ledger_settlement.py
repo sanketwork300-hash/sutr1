@@ -8,7 +8,7 @@ from sqlmodel import select
 from sutr.billing import dunning, invoices, ledger, pricing, settlement
 from sutr.common.errors import ConflictError, InvalidRequestError
 from sutr.config import settings
-from sutr.models.invoice import Invoice, InvoiceLine
+from sutr.models.invoice import STATE_ISSUED, Invoice, InvoiceLine
 from sutr.models.ledger_entry import LedgerEntry
 from sutr.models.settlement import Settlement
 
@@ -280,12 +280,14 @@ def test_a_settlement_records_the_share_that_applied(session, test_org, provider
     meter(session, test_org.id, count=100, tool=tool)
     result = _generate(session, test_org.id)
     invoices.issue(session, result.invoice)
+    invoices.mark_paid(session, result.invoice)
     session.commit()
 
     record = _settle(session, provider_org)
     session.commit()
     assert record.state == "complete"
     assert record.gross_micros == 100_000_000
+    assert settlement.serialize(record)["invoice_ids"] == [str(result.invoice.id)]
     assert record.provider_share_bps == 8000
     assert record.provider_micros == 80_000_000
     assert record.platform_micros == 20_000_000
@@ -295,6 +297,8 @@ def test_a_settlement_records_the_share_that_applied(session, test_org, provider
 
 
 def test_a_per_run_override_beats_the_configured_share(session, test_org, provider_org, tool):
+    """The parameter remains for the platform's own callers; the tenant-facing
+    route never passes it (see test_api)."""
     record = _settle(session, provider_org, provider_share_bps=6500)
     session.commit()
     assert record.provider_share_bps == 6500
@@ -332,6 +336,143 @@ def test_settling_a_period_twice_is_refused(session, provider_org):
     session.commit()
     with pytest.raises(ConflictError, match="double the provider's payable"):
         _settle(session, provider_org)
+
+
+def _tool_invoice(session, test_org, tool, *, count=100, state="paid"):
+    """An invoice for `count` calls of the provider's tool, in the given state."""
+    plan = pricing.create(
+        session,
+        org_id=test_org.id,
+        key="tool-plan",
+        name="Tool",
+        model="per_invocation",
+        amount_micros=1_000_000,
+        tool_id=tool.id,
+    )
+    pricing.publish(session, plan)
+    session.commit()
+    meter(session, test_org.id, count=count, tool=tool)
+    result = _generate(session, test_org.id)
+    if state in ("issued", "paid"):
+        invoices.issue(session, result.invoice)
+    if state == "paid":
+        invoices.mark_paid(session, result.invoice)
+    session.commit()
+    return result.invoice
+
+
+def test_an_issued_but_unpaid_invoice_is_not_settled(session, test_org, provider_org, tool):
+    """L2: an unpaid invoice is a promise, and a consumer who never keeps it
+    must not have handed the provider a payable. Only paid invoices settle."""
+    invoice = _tool_invoice(session, test_org, tool, state="issued")
+    record = _settle(session, provider_org)
+    session.commit()
+    assert record.gross_micros == 0
+    assert record.provider_micros == 0
+    assert settlement.serialize(record)["invoice_ids"] == []
+    assert ledger.balance(session, org_id=provider_org.id, account="payable").balance_micros == 0
+    assert invoice.state == "issued"
+
+
+def test_an_overlapping_settlement_period_is_refused(session, test_org, provider_org, tool):
+    """L1: the guard is on overlap, because the totals are summed over a range.
+    Jan 1–Feb 1 then Jan 1–Feb 2 would otherwise credit the same invoices twice."""
+    _tool_invoice(session, test_org, tool)
+    _settle(session, provider_org)
+    session.commit()
+    payable = ledger.balance(session, org_id=provider_org.id, account="payable").balance_micros
+    assert payable == -80_000_000
+
+    overlaps = [
+        (PERIOD_START, PERIOD_END + timedelta(days=1)),  # same start, later end
+        (PERIOD_START - timedelta(days=1), PERIOD_END),  # earlier start, same end
+        (PERIOD_START + timedelta(days=5), PERIOD_END - timedelta(days=5)),  # inside
+        (PERIOD_START - timedelta(days=5), PERIOD_END + timedelta(days=5)),  # around
+        (PERIOD_END - timedelta(days=1), PERIOD_END + timedelta(days=30)),  # straddles end
+    ]
+    for start, end in overlaps:
+        with pytest.raises(ConflictError, match="overlaps"):
+            settlement.run(
+                session, provider_org_id=provider_org.id, period_start=start, period_end=end
+            )
+    # The payable is exactly what the first run wrote.
+    assert (
+        ledger.balance(session, org_id=provider_org.id, account="payable").balance_micros == payable
+    )
+    # An adjacent period is not an overlap: half-open intervals share an edge.
+    record = settlement.run(
+        session,
+        provider_org_id=provider_org.id,
+        period_start=PERIOD_END,
+        period_end=PERIOD_END + timedelta(days=30),
+    )
+    session.commit()
+    assert record.state == "complete"
+    assert record.gross_micros == 0
+
+
+def test_an_overlapping_invoice_period_is_refused(session, test_org, plan):
+    """L1, for invoices: Jan 1–31 then Jan 1–30 would price the same usage twice."""
+    meter(session, test_org.id, count=20)
+    first = _generate(session, test_org.id)
+    session.commit()
+
+    shorter = (PERIOD_START, PERIOD_END - timedelta(days=1))
+    shifted = (PERIOD_START + timedelta(days=10), PERIOD_END + timedelta(days=10))
+    for start, end in (shorter, shifted):
+        with pytest.raises(ConflictError, match="overlaps"):
+            invoices.generate(session, org_id=test_org.id, period_start=start, period_end=end)
+    assert len(session.exec(select(Invoice)).all()) == 1
+
+    # A voided invoice no longer bills its usage, so the period is free again.
+    invoices.void(session, first.invoice, reason="wrong bounds")
+    session.commit()
+    second = invoices.generate(
+        session, org_id=test_org.id, period_start=shorter[0], period_end=shorter[1]
+    )
+    session.commit()
+    assert second.invoice.id != first.invoice.id
+    assert second.invoice.total_micros == first.invoice.total_micros
+
+
+def test_voiding_a_settled_invoice_takes_back_the_providers_share(
+    session, test_org, provider_org, tool
+):
+    """L2: a settlement credit for an invoice that is later voided is a payable
+    for revenue that never existed. The compensation is a ledger entry, not an
+    edit to the settlement."""
+    invoice = _tool_invoice(session, test_org, tool)
+    record = _settle(session, provider_org)
+    session.commit()
+    payable = ledger.balance(session, org_id=provider_org.id, account="payable")
+    assert payable.balance_micros == -80_000_000
+
+    # A paid invoice refuses to be voided, and only paid invoices settle, so
+    # the void-after-settlement path cannot be reached through the API today.
+    # The compensation has to be right anyway: this is the state the void
+    # guard protects, flipped by hand so that the guard is not what is tested.
+    invoice.state = STATE_ISSUED
+    session.add(invoice)
+    session.commit()
+    invoices.void(session, invoice, reason="disputed after month end")
+    session.commit()
+
+    assert ledger.balance(session, org_id=provider_org.id, account="payable").balance_micros == 0
+    compensation = [
+        entry
+        for entry in ledger.entries_for(session, org_id=provider_org.id, account="payable")
+        if entry.direction == "debit"
+    ]
+    assert len(compensation) == 1
+    assert compensation[0].settlement_id == record.id
+    assert compensation[0].invoice_id == invoice.id
+    assert compensation[0].amount_micros == 80_000_000
+    # The settlement row itself is untouched: §5.1, corrections are entries.
+    session.refresh(record)
+    assert record.provider_micros == 80_000_000
+    assert record.state == "complete"
+    # And the compensation is written once, however often it is asked for.
+    assert settlement.reverse_invoice_share(session, invoice, reason="again") == []
 
 
 def test_a_draft_invoice_is_not_settled(session, test_org, provider_org, tool):

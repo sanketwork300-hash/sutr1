@@ -360,7 +360,11 @@ def decide(
         raise ConflictError(f"This review is already {review.state}.")
     if review.current_stage != STAGE_APPROVAL:
         raise ConflictError(f"The workflow is at {review.current_stage}, not manual approval.")
-    if decided_by_user_id is not None and review.requested_by_user_id == decided_by_user_id:
+    if decided_by_user_id is None:
+        # Not exempt from four-eyes: ineligible. An API key is held by somebody,
+        # and that somebody may be the requester.
+        raise ForbiddenError("A decision needs an identified user; API keys cannot approve.")
+    if review.requested_by_user_id == decided_by_user_id:
         raise ForbiddenError("You opened this review, so somebody else has to decide it.")
 
     review.state = STATE_APPROVED if approve else STATE_REJECTED

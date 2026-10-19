@@ -349,3 +349,15 @@ def test_every_registry_tool_row_belongs_to_one_org(session, test_org, registere
     rows = session.exec(select(RegistryTool)).all()
     assert {row.org_id for row in rows} == {test_org.id}
     assert session.exec(select(RegistryChangeRequest)).all() == []
+
+
+def test_an_unidentified_decider_is_refused_not_exempt(session, test_user, registered_tool):
+    """L5: `None` is what an API key produces, and the requester may hold the
+    key. It is not a fifth eye, even on a solo install."""
+    request = service.request_visibility(
+        session, registered_tool, visibility="public", requested_by_user_id=test_user.id
+    )
+    with pytest.raises(ForbiddenError, match="identified user"):
+        service.decide(session, request, approve=True, decided_by_user_id=None)
+    assert request.status == "pending"
+    assert registered_tool.visibility == "private"

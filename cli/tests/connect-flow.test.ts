@@ -148,7 +148,9 @@ describe("runConnect — success", () => {
   it("sends the key as a header, and only to the configured instance", async () => {
     const { calls } = scriptedFetch(HAPPY_ROUTES);
     await runConnect(options(), deps());
-    expect(calls.every((call) => call.url.startsWith(URL))).toBe(true);
+    // Compare parsed origins: a prefix check would also accept https://sutr.test.evil.
+    const origin = new globalThis.URL(URL).origin;
+    expect(calls.every((call) => new globalThis.URL(call.url).origin === origin)).toBe(true);
     expect(calls[0].headers["X-API-Key"]).toBe(KEY);
   });
 

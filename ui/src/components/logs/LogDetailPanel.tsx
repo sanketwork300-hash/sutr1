@@ -204,7 +204,7 @@ export function LogDetailPanel({ entry, onClose }: { entry: LogEntry; onClose: (
         }
       />,
     )
-  } else if (!approval && (isPending || isApproved)) {
+  } else if (isPending || isApproved) {
     // Approval request not loaded yet / not found — show a placeholder
     stages.push(
       <StageRow

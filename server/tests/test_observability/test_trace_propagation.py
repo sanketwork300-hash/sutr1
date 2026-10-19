@@ -174,7 +174,9 @@ def captured_requests_fixture(monkeypatch):
     The dispatch-time URL screen is stubbed out: it resolves the hostname for
     real, and a test that needs DNS is a test that fails on an aeroplane.
     """
-    monkeypatch.setattr("sutr.api_client.validate_safe_url", lambda url, **kw: None)
+    monkeypatch.setattr(
+        "sutr.upstream_safety._resolve_host", lambda hostname, port: ("93.184.216.34",)
+    )
 
     sent: list[httpx.Request] = []
 
@@ -276,7 +278,9 @@ async def test_an_upstream_error_is_recorded_on_the_provider_span(
             )
             super().__init__(*args, **kwargs)
 
-    monkeypatch.setattr("sutr.api_client.validate_safe_url", lambda url, **kw: None)
+    monkeypatch.setattr(
+        "sutr.upstream_safety._resolve_host", lambda hostname, port: ("93.184.216.34",)
+    )
     monkeypatch.setattr("sutr.api_client.httpx.AsyncClient", Failing)
     await _call_the_provider(session, test_org)
 
@@ -362,8 +366,7 @@ def test_propagation_degrades_to_the_correlation_id_alone(monkeypatch):
     """The base install carries no OpenTelemetry package at all."""
     from sutr.request_context import set_correlation_id
 
-    monkeypatch.setattr(propagation, "_propagator", None)
-    monkeypatch.setattr(propagation, "_propagator_loaded", True)
+    monkeypatch.setattr(propagation, "_get_propagator", lambda: None)
     set_correlation_id("corr-no-sdk")
 
     headers = propagation.outbound_headers({"Authorization": "Bearer x"})

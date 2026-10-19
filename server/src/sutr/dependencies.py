@@ -10,7 +10,7 @@ from sqlmodel import Session, select
 
 from sutr.config import settings
 from sutr.db import get_session
-from sutr.models.api_key import ApiKey
+from sutr.models.api_key import ApiKey, hash_api_key
 from sutr.models.oauth_revoked_token import OAuthRevokedToken
 from sutr.models.org import Org
 from sutr.models.org_membership import OrgMembership
@@ -139,16 +139,25 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     payload = _decode_rest_bearer_token(token, session, credentials_exception)
-    user_id: str | None = payload.get("sub")
-    if user_id is None:
-        raise credentials_exception
+    user_uuid = _subject_uuid(payload, credentials_exception)
 
-    user = session.get(User, uuid.UUID(user_id))
+    user = session.get(User, user_uuid)
     if user is None or not user.is_active:
         raise credentials_exception
     if not _token_version_current(payload, user):
         raise credentials_exception
     return user
+
+
+def _subject_uuid(payload: dict, credentials_exception: HTTPException) -> uuid.UUID:
+    """The `sub` claim as a UUID; a missing or malformed subject is a 401, not a 500."""
+    user_id = payload.get("sub")
+    if user_id is None:
+        raise credentials_exception
+    try:
+        return uuid.UUID(str(user_id))
+    except (ValueError, TypeError, AttributeError):
+        raise credentials_exception
 
 
 def get_impersonator(
@@ -220,7 +229,7 @@ def get_agent_auth(
     # 1. Try API key first
     raw_key = request.headers.get("X-API-Key")
     if raw_key:
-        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+        key_hash = hash_api_key(raw_key)
         api_key = session.exec(
             select(ApiKey).where(ApiKey.key_hash == key_hash).where(ApiKey.is_active == True)  # noqa: E712
         ).first()
@@ -252,11 +261,9 @@ def get_agent_auth(
             headers={"WWW-Authenticate": "Bearer"},
         )
         payload = _decode_rest_bearer_token(token, session, credentials_exception)
-        user_id: str | None = payload.get("sub")
-        if user_id is None:
-            raise credentials_exception
+        user_uuid = _subject_uuid(payload, credentials_exception)
 
-        user = session.get(User, uuid.UUID(user_id))
+        user = session.get(User, user_uuid)
         if user is None or not user.is_active:
             raise credentials_exception
         if not _token_version_current(payload, user):

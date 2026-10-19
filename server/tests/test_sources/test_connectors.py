@@ -176,6 +176,23 @@ class _Stream:
         return False
 
 
+def _unpinned(url, **kwargs):
+    """Skip DNS and the pin, keeping the target shape the connector consumes."""
+    from urllib.parse import urlsplit
+
+    from sutr.upstream_safety import PinnedTarget
+
+    parsed = urlsplit(url)
+    return PinnedTarget(
+        url=url,
+        hostname=parsed.hostname or "",
+        port=parsed.port or 443,
+        address=parsed.hostname or "",
+        headers={},
+        extensions={},
+    )
+
+
 def _patch_stream(response, captured: dict):
     def stream(self, method, url, **kwargs):
         captured["headers"] = kwargs.get("headers") or {}
@@ -191,7 +208,7 @@ def _patch_stream(response, captured: dict):
 
 
 async def test_a_url_fetch_records_etag_and_last_modified(monkeypatch):
-    monkeypatch.setattr("sutr.source_connectors.url.validate_safe_url", lambda url: None)
+    monkeypatch.setattr("sutr.source_connectors.url.pinned_request_target", _unpinned)
     captured: dict = {}
     response = _response(
         200,
@@ -208,7 +225,7 @@ async def test_a_url_fetch_records_etag_and_last_modified(monkeypatch):
 
 async def test_a_url_fetch_sends_what_it_already_has(monkeypatch):
     """This is what makes polling cheap rather than rude."""
-    monkeypatch.setattr("sutr.source_connectors.url.validate_safe_url", lambda url: None)
+    monkeypatch.setattr("sutr.source_connectors.url.pinned_request_target", _unpinned)
     captured: dict = {}
     with _patch_stream(_response(304), captured):
         result = await UrlConnector().fetch(
@@ -228,7 +245,7 @@ async def test_a_url_fetch_sends_what_it_already_has(monkeypatch):
 
 
 async def test_a_304_carries_the_known_provenance_forward(monkeypatch):
-    monkeypatch.setattr("sutr.source_connectors.url.validate_safe_url", lambda url: None)
+    monkeypatch.setattr("sutr.source_connectors.url.pinned_request_target", _unpinned)
     known = Provenance(source_type="url", source_uri="https://x/openapi.json", etag='"keep"')
     with _patch_stream(_response(304), {}):
         result = await UrlConnector().fetch({"url": "https://x/openapi.json"}, {}, known=known)
@@ -238,7 +255,7 @@ async def test_a_304_carries_the_known_provenance_forward(monkeypatch):
 
 async def test_a_redirect_is_refused_rather_than_followed(monkeypatch):
     """Following one could bounce a credential to another host."""
-    monkeypatch.setattr("sutr.source_connectors.url.validate_safe_url", lambda url: None)
+    monkeypatch.setattr("sutr.source_connectors.url.pinned_request_target", _unpinned)
     from sutr.source_connectors.base import ConnectorError
 
     with _patch_stream(_response(302), {}):

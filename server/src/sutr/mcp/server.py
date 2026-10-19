@@ -14,6 +14,7 @@ import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from fastapi import HTTPException
 from mcp import types
@@ -43,7 +44,59 @@ from sutr.services.tool_pipeline import (
 logger = logging.getLogger(__name__)
 
 # Injected per-request by the ASGI wrapper before handle_request runs.
+#
+# For the StreamableHTTP transport this ContextVar is only reliable for the
+# request that *creates* a session: the SDK starts the session's server task
+# from the initialize request, so every later request on that session runs
+# inside a context that still holds the creator's auth. The ASGI wrapper
+# therefore also records each request's freshly authenticated identity in
+# `_session_auth`, keyed by session id, and handlers read it through
+# `current_auth()` so revocation and membership changes take effect on the
+# next request rather than at the next session.
 _current_auth: ContextVar = ContextVar("_current_auth")
+
+# session id -> auth of the most recent authenticated request on that session.
+# Written only by the ASGI wrapper (mcp/asgi.py), which has already verified
+# that the request's principal is the one that opened the session.
+_session_auth: dict[str, Any] = {}
+
+MCP_SESSION_ID_HEADER = "mcp-session-id"
+
+
+def _request_session_id() -> str | None:
+    """The StreamableHTTP session id of the request a handler is serving.
+
+    The SDK hands the transport's Starlette request to handlers through the
+    request context; SSE and stdio sessions carry no session id header and
+    fall through to the ContextVar, which is correct for them because their
+    whole session runs in the authenticating request's task.
+    """
+    try:
+        request = mcp_server.request_context.request
+    except LookupError:
+        return None
+    headers = getattr(request, "headers", None)
+    if headers is None:
+        return None
+    try:
+        return headers.get(MCP_SESSION_ID_HEADER)
+    except Exception:  # pragma: no cover - defensive against exotic request objects
+        return None
+
+
+def current_auth():
+    """The identity the *current* request authenticated as.
+
+    Prefers the per-session entry maintained by the ASGI wrapper (the
+    credential presented on this very request) and falls back to the
+    ContextVar for transports that bind auth for the life of the session.
+    """
+    session_id = _request_session_id()
+    if session_id is not None:
+        auth = _session_auth.get(session_id)
+        if auth is not None:
+            return auth
+    return _current_auth.get()
 
 
 @dataclass
@@ -80,7 +133,7 @@ mcp_server.create_initialization_options = _create_init_options_with_list_change
 
 @mcp_server.list_tools()
 async def _list_tools() -> list[types.Tool]:
-    auth = _current_auth.get()
+    auth = current_auth()
     org_id = auth.org.id
 
     # Register this MCP session under its org so tool-list mutations elsewhere
@@ -99,7 +152,7 @@ async def _list_tools() -> list[types.Tool]:
 
 @mcp_server.call_tool()
 async def _call_tool(name: str, arguments: dict) -> list[types.TextContent]:
-    auth = _current_auth.get()
+    auth = current_auth()
 
     if name.startswith(management_tools.MANAGEMENT_PREFIX):
         return await management_tools.dispatch(name, arguments, auth)
@@ -117,7 +170,7 @@ async def _call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
 def _pipeline_context(additional_info: str | None = None, session=None) -> CallContext:
     """Build the pipeline CallContext from this request's MCP contextvars."""
-    auth = _current_auth.get()
+    auth = current_auth()
     meta = _current_request_meta.get()
     return CallContext.from_agent_auth(
         auth,
@@ -173,12 +226,13 @@ async def execute_upstream_tool(
         if isinstance(raw, str) and raw.strip():
             additional_info = raw
 
+    auth = current_auth()
     with Session(engine) as session:
         ctx = _pipeline_context(additional_info, session=session)
         # Viewers may browse tools but never execute them (API keys carry no
         # role and keep their documented capabilities).
         try:
-            ensure_agent_can(session, _current_auth.get(), "tools:execute")
+            ensure_agent_can(session, auth, "tools:execute")
         except HTTPException:
             return _text("Your role does not allow executing tools (tools:execute).")
 
@@ -241,7 +295,7 @@ async def await_approval(request_id: uuid.UUID) -> list[types.TextContent]:
     Ownership is enforced: the request must belong to the caller's org,
     matching the existing /api/tool-approvals/requests/{id} behavior.
     """
-    auth = _current_auth.get()
+    auth = current_auth()
     org = auth.org
 
     # Initial ownership + state check so we 404 fast on bad ids.
@@ -325,7 +379,7 @@ async def await_approval(request_id: uuid.UUID) -> list[types.TextContent]:
     with Session(engine) as session:
         ctx = _pipeline_context(additional_info, session=session)
         try:
-            ensure_agent_can(session, _current_auth.get(), "tools:execute")
+            ensure_agent_can(session, auth, "tools:execute")
         except HTTPException:
             return _text("Your role does not allow executing tools (tools:execute).")
 

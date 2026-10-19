@@ -32,7 +32,7 @@ from sutr.source_connectors.base import (
     SourceConnector,
     WatchPlan,
 )
-from sutr.upstream_safety import UnsafeUpstreamUrlError, validate_safe_url
+from sutr.upstream_safety import UnsafeUpstreamUrlError, pinned_request_target, validate_safe_url
 
 
 def _now() -> str:
@@ -103,15 +103,16 @@ async def conditional_fetch(
     """GET a document, asking the server not to resend what we already have.
 
     Shares `fetch_spec_from_url`'s safety rules by reusing its validation and
-    limits: SSRF-screened, redirects refused (a redirect could bounce a
-    credential to another host), and size-capped.
+    limits: SSRF-screened and pinned to the screened address, redirects
+    refused (a redirect could bounce a credential to another host), and
+    size-capped.
     """
     try:
-        validate_safe_url(url)
+        target = pinned_request_target(url)
     except UnsafeUpstreamUrlError as exc:
         raise ConnectorError("unsafe_url", f"Unsafe specification URL: {exc}")
 
-    request_headers = dict(headers or {})
+    request_headers = {**(headers or {}), **target.headers}
     if known:
         if known.etag:
             request_headers["If-None-Match"] = known.etag
@@ -122,7 +123,9 @@ async def conditional_fetch(
         async with httpx.AsyncClient(
             timeout=URL_FETCH_TIMEOUT_SECONDS, follow_redirects=False
         ) as client:
-            async with client.stream("GET", url, headers=request_headers) as response:
+            async with client.stream(
+                "GET", target.url, headers=request_headers, extensions=target.extensions
+            ) as response:
                 if response.status_code == 304:
                     # The source says we already have this. Carry the known
                     # provenance forward, with a fresh retrieval time.

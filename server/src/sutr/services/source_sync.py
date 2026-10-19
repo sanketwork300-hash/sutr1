@@ -171,9 +171,15 @@ async def check_source(
             result = await connector.fetch(config, secrets, known=known)
         except (ConnectorError, OpenAPIError) as exc:
             return _fail(session, source, getattr(exc, "message", str(exc)))
-        except Exception as exc:  # pragma: no cover — defensive
+        except Exception:  # pragma: no cover — defensive
             logger.exception("source %s check crashed", source.id)
-            return _fail(session, source, f"Unexpected error: {exc}")
+            # `last_error` is shown to every member who can read the source;
+            # the exception's text is for the operator, and is in the log.
+            return _fail(
+                session,
+                source,
+                "An unexpected error stopped the check. The server log has the details.",
+            )
 
         source.consecutive_failures = 0
         source.last_error = None

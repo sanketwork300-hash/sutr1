@@ -41,13 +41,32 @@ services:
         required: false
     volumes:
       - sutr_data:/data
+      # Generated keys live on their own volume, apart from the database: a
+      # copy of /data (a backup, a replica, a laptop) must not also carry the
+      # key that mints sessions and the key that decrypts stored credentials.
+      # An older install's /data/jwt_secret is copied across on first boot.
+      - sutr_secrets:/secrets
     command: >
       sh -c '
+        SECRETS_DIR=/secrets;
+        if [ ! -w /secrets ]; then
+          echo "warning: /secrets is not writable; keeping generated keys on /data" >&2;
+          SECRETS_DIR=/data;
+        fi;
         if [ -z "$$JWT_SECRET_KEY" ]; then
-          if [ ! -f /data/jwt_secret ]; then
-            python -c "import secrets; print(secrets.token_hex(32))" > /data/jwt_secret;
+          if [ ! -f $$SECRETS_DIR/jwt_secret ] && [ -f /data/jwt_secret ]; then
+            cp /data/jwt_secret $$SECRETS_DIR/jwt_secret;
           fi;
-          export JWT_SECRET_KEY=$$(cat /data/jwt_secret);
+          if [ ! -f $$SECRETS_DIR/jwt_secret ]; then
+            python -c "import secrets; print(secrets.token_hex(32))" > $$SECRETS_DIR/jwt_secret;
+          fi;
+          export JWT_SECRET_KEY=$$(cat $$SECRETS_DIR/jwt_secret);
+        fi;
+        if [ -z "$$SECRETS_ENCRYPTION_KEY" ]; then
+          if [ ! -f $$SECRETS_DIR/secrets_encryption_key ]; then
+            python -c "import secrets; print(secrets.token_hex(32))" > $$SECRETS_DIR/secrets_encryption_key;
+          fi;
+          export SECRETS_ENCRYPTION_KEY=$$(cat $$SECRETS_DIR/secrets_encryption_key);
         fi &&
         uv run alembic upgrade head &&
         exec ./start.sh
@@ -61,5 +80,6 @@ services:
 
 volumes:
   sutr_data:
+  sutr_secrets:
   caddy_data:
   caddy_config:

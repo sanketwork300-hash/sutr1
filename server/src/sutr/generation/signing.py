@@ -75,7 +75,10 @@ def _load_private_key(material: str) -> Ed25519PrivateKey:
         try:
             key = serialization.load_pem_private_key(text.encode("utf-8"), password=None)
         except (ValueError, TypeError) as exc:
-            raise SigningKeyError(f"The signing key is not a readable PEM private key: {exc}")
+            # The library's own wording stays on the chain for the operator's
+            # traceback; the message is reported by `/capabilities`, so it is
+            # ours alone.
+            raise SigningKeyError("The signing key is not a readable PEM private key.") from exc
         if not isinstance(key, Ed25519PrivateKey):
             raise SigningKeyError(
                 "The signing key must be Ed25519; a key of another type was configured."
@@ -84,7 +87,7 @@ def _load_private_key(material: str) -> Ed25519PrivateKey:
     try:
         raw = base64.b64decode(text, validate=True)
     except (binascii.Error, ValueError) as exc:
-        raise SigningKeyError(f"The signing key is neither PEM nor valid base64: {exc}")
+        raise SigningKeyError("The signing key is neither PEM nor valid base64.") from exc
     if len(raw) != 32:
         raise SigningKeyError(
             f"An Ed25519 seed is 32 bytes; the configured key decodes to {len(raw)}."

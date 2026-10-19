@@ -39,6 +39,10 @@ from typing import Any
 from sqlmodel import Session
 
 from sutr.authz import PERMISSIONS, role_can
+
+# Imported by full path so the boundary analysis sees `governance.policies`
+# — the shared half — rather than the control-plane `governance` package.
+from sutr.governance.policies import active_rules as policy_rules_for
 from sutr.provisioning import rules
 from sutr.provisioning.identity import Principal
 
@@ -168,7 +172,12 @@ def _abac_layer(
         # why `role` on an agent is the tenant's own business attribute.
         subject["role"] = principal.role
     outcome = rules.evaluate(
-        session, org_id=principal.org_id, subject=subject, resource=resource, action=action
+        session,
+        org_id=principal.org_id,
+        subject=subject,
+        resource=resource,
+        policy_rules=policy_rules_for(session, org_id=principal.org_id, action=action),
+        action=action,
     )
     if outcome.effect is None:
         return LayerResult(
